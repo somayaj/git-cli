@@ -4,12 +4,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Serialize)]
-struct GenerateRequest {
+struct ChatRequest {
     model: String,
-    prompt: String,
+    messages: Vec<ChatMessage>,
     stream: bool,
     options: GenerateOptions,
     keep_alive: String,
+}
+
+#[derive(Serialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
 }
 
 #[derive(Serialize)]
@@ -20,28 +26,43 @@ struct GenerateOptions {
 }
 
 #[derive(Deserialize)]
-struct GenerateChunk {
-    response: String,
+struct ChatChunk {
+    message: Option<ChunkMessage>,
     done: bool,
     #[serde(flatten)]
     _extra: std::collections::HashMap<String, Value>,
 }
 
+#[derive(Deserialize)]
+struct ChunkMessage {
+    content: String,
+}
+
 pub async fn generate(
     endpoint: &str,
     model: &str,
-    prompt: &str,
+    system_prompt: &str,
+    user_prompt: &str,
     keep_alive: &str,
 ) -> Result<String, String> {
-    let url = format!("{endpoint}/api/generate");
+    let url = format!("{endpoint}/api/chat");
     let client = Client::new();
 
-    let request = GenerateRequest {
+    let request = ChatRequest {
         model: model.to_string(),
-        prompt: prompt.to_string(),
+        messages: vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: system_prompt.to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: user_prompt.to_string(),
+            },
+        ],
         stream: true,
         options: GenerateOptions {
-            num_predict: 256,
+            num_predict: 512,
             temperature: 0.1,
             stop: vec!["\n\n\n".to_string()],
         },
@@ -72,10 +93,12 @@ pub async fn generate(
             if line.trim().is_empty() {
                 continue;
             }
-            match serde_json::from_str::<GenerateChunk>(line) {
+            match serde_json::from_str::<ChatChunk>(line) {
                 Ok(chunk) => {
-                    eprint!("{}", chunk.response);
-                    full_response.push_str(&chunk.response);
+                    if let Some(msg) = &chunk.message {
+                        eprint!("{}", msg.content);
+                        full_response.push_str(&msg.content);
+                    }
                     if chunk.done {
                         eprintln!();
                         return Ok(full_response);

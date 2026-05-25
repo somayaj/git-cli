@@ -1,4 +1,5 @@
 use colored::Colorize;
+use regex::Regex;
 use std::process::Command;
 
 pub struct ParsedOutput {
@@ -50,18 +51,15 @@ pub fn parse_response(response: &str) -> ParsedOutput {
 fn sanitize_response(response: &str) -> String {
     let mut result = response.to_string();
 
-    // Strip markdown code fences
     result = result.replace("```bash", "");
     result = result.replace("```shell", "");
     result = result.replace("```sh", "");
     result = result.replace("```", "");
 
-    // Strip numbered prefixes like "1. " or "Step 1: "
     let lines: Vec<String> = result
         .lines()
         .map(|line| {
             let trimmed = line.trim();
-            // "1. git ..." or "1) git ..."
             if let Some(rest) = strip_numbering(trimmed) {
                 rest.to_string()
             } else {
@@ -77,7 +75,6 @@ fn strip_numbering(line: &str) -> Option<&str> {
     let bytes = line.as_bytes();
     let mut i = 0;
 
-    // Skip digits
     while i < bytes.len() && bytes[i].is_ascii_digit() {
         i += 1;
     }
@@ -85,13 +82,11 @@ fn strip_numbering(line: &str) -> Option<&str> {
         return None;
     }
 
-    // Expect ". " or ") " or ": "
     if i + 1 < bytes.len() && (bytes[i] == b'.' || bytes[i] == b')' || bytes[i] == b':') {
         let rest = &line[i + 1..];
         return Some(rest.trim_start());
     }
 
-    // "Step N: " pattern
     let lower = line.to_lowercase();
     if lower.starts_with("step ") {
         if let Some(colon_pos) = line.find(':') {
@@ -103,14 +98,135 @@ fn strip_numbering(line: &str) -> Option<&str> {
 }
 
 fn is_safe_command(cmd: &str) -> bool {
-    // Block shell injection patterns
+    if !cmd.starts_with("git ") {
+        return false;
+    }
+
+    // Check for injection patterns only OUTSIDE of quotes
+    let unquoted = strip_quoted_sections(cmd);
     let injection_patterns = ["&&", "||", ";", "$(", "`", "|"];
     for pat in &injection_patterns {
-        if cmd.contains(pat) {
+        if unquoted.contains(pat) {
             return false;
         }
     }
+
+    if let Some(n) = extract_head_offset(cmd) {
+        let commit_count = get_commit_count();
+        if n > commit_count {
+            eprintln!(
+                "  {} HEAD~{} but repo only has {} commit(s). Skipping.",
+                "Warning:".yellow().bold(),
+                n,
+                commit_count
+            );
+            return false;
+        }
+    }
+
+    // Block commit with trailing bare hash references (LLM hallucination)
+    if cmd.contains("git commit") {
+        if let Ok(re) = Regex::new(r"[0-9a-f]{7,}\^?\s*$") {
+            let after_message = if let Some(pos) = cmd.find("-m ") {
+                let rest = &cmd[pos + 3..];
+                // Skip past the quoted message
+                if rest.starts_with('"') {
+                    rest[1..].find('"').map(|end| &rest[end + 2..])
+                } else if rest.starts_with('\'') {
+                    rest[1..].find('\'').map(|end| &rest[end + 2..])
+                } else {
+                    rest.split_whitespace().nth(1).map(|s| s)
+                }
+            } else {
+                None
+            };
+
+            if let Some(trailing) = after_message {
+                let trailing = trailing.trim();
+                if !trailing.is_empty() && re.is_match(trailing) {
+                    eprintln!(
+                        "  {} Malformed commit command with trailing hash. Skipping.",
+                        "Warning:".yellow().bold(),
+                    );
+                    return false;
+                }
+            }
+        }
+    }
+
     true
+}
+
+fn strip_quoted_sections(cmd: &str) -> String {
+    let mut result = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+
+    for ch in cmd.chars() {
+        match ch {
+            '\'' if !in_double => {
+                in_single = !in_single;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+            }
+            _ if !in_single && !in_double => {
+                result.push(ch);
+            }
+            _ => {}
+        }
+    }
+    result
+}
+
+fn extract_head_offset(cmd: &str) -> Option<u32> {
+    Regex::new(r"HEAD~(\d+)")
+        .ok()?
+        .captures(cmd)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse().ok())
+}
+
+fn get_commit_count() -> u32 {
+    Command::new("git")
+        .args(["rev-list", "--count", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
+        .unwrap_or(0)
+}
+
+fn shell_split(cmd: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+
+    for ch in cmd.chars() {
+        match ch {
+            '\'' if !in_double_quote => {
+                in_single_quote = !in_single_quote;
+            }
+            '"' if !in_single_quote => {
+                in_double_quote = !in_double_quote;
+            }
+            ' ' if !in_single_quote && !in_double_quote => {
+                if !current.is_empty() {
+                    parts.push(current.clone());
+                    current.clear();
+                }
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+
+    parts
 }
 
 pub fn has_destructive_commands(parsed: &ParsedOutput) -> bool {
@@ -168,12 +284,12 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
     for cmd_str in commands {
         println!("  {} {}", "Running:".cyan().bold(), cmd_str);
 
-        let parts: Vec<&str> = cmd_str.split_whitespace().collect();
+        let parts = shell_split(cmd_str);
         if parts.is_empty() {
             continue;
         }
 
-        let output = Command::new(parts[0])
+        let output = Command::new(&parts[0])
             .args(&parts[1..])
             .output()
             .map_err(|e| format!("Failed to run `{cmd_str}`: {e}"))?;

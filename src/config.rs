@@ -3,14 +3,19 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-const DEFAULT_MODEL: &str = "mistral";
+const DEFAULT_MODEL_FAST: &str = "qwen2.5:3b";
+const DEFAULT_MODEL_SMART: &str = "qwen2.5:3b";
 const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
 const DEFAULT_KEEP_ALIVE: &str = "10m";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
-    #[serde(default = "default_model")]
-    pub model: String,
+    #[serde(default = "default_model_fast")]
+    pub model_fast: String,
+    #[serde(default = "default_model_smart")]
+    pub model_smart: String,
+    #[serde(default)]
+    pub model: Option<String>,
     #[serde(default = "default_endpoint")]
     pub endpoint: String,
     #[serde(default = "default_keep_alive")]
@@ -19,8 +24,12 @@ pub struct Config {
     pub aliases: HashMap<String, String>,
 }
 
-fn default_model() -> String {
-    DEFAULT_MODEL.to_string()
+fn default_model_fast() -> String {
+    DEFAULT_MODEL_FAST.to_string()
+}
+
+fn default_model_smart() -> String {
+    DEFAULT_MODEL_SMART.to_string()
 }
 
 fn default_endpoint() -> String {
@@ -34,12 +43,29 @@ fn default_keep_alive() -> String {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            model: default_model(),
+            model_fast: default_model_fast(),
+            model_smart: default_model_smart(),
+            model: None,
             endpoint: default_endpoint(),
             keep_alive: default_keep_alive(),
             aliases: HashMap::new(),
         }
     }
+}
+
+const COMPLEX_KEYWORDS: &[&str] = &[
+    "rewrite", "rebase", "squash", "cherry-pick", "cherry pick",
+    "bisect", "filter", "reflog", "submodule", "subtree",
+    "worktree", "every commit", "all commits", "multiple commits",
+    "rename commit", "reword", "interactive",
+    "conflict", "resolve", "hook", "migrate",
+    "convert", "split", "reorganize", "restructure",
+    "history", "rewrite history",
+];
+
+pub fn is_complex_task(task: &str) -> bool {
+    let lower = task.to_lowercase();
+    COMPLEX_KEYWORDS.iter().any(|k| lower.contains(k))
 }
 
 impl Config {
@@ -67,12 +93,23 @@ impl Config {
 
     pub fn apply_overrides(mut self, model: Option<String>, endpoint: Option<String>) -> Self {
         if let Some(m) = model {
-            self.model = m;
+            self.model = Some(m);
         }
         if let Some(e) = endpoint {
             self.endpoint = e;
         }
         self
+    }
+
+    pub fn select_model(&self, task: &str) -> String {
+        if let Some(ref m) = self.model {
+            return m.clone();
+        }
+        if is_complex_task(task) {
+            self.model_smart.clone()
+        } else {
+            self.model_fast.clone()
+        }
     }
 
     pub fn resolve_alias(&self, input: &str) -> String {

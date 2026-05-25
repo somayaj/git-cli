@@ -48,24 +48,7 @@ async fn main() {
     };
 
     let config = Config::load().apply_overrides(cli.model, cli.endpoint);
-
     let resolved_task = config.resolve_alias(&task);
-
-    // Try shortcuts first for instant results
-    if let Some(shortcut) = shortcuts::try_shortcut(&resolved_task) {
-        eprintln!("{} Matched shortcut (instant)", "⚡".cyan());
-        let response = shortcut.to_response_string();
-        let parsed = executor::parse_response(&response);
-        executor::display(&parsed);
-
-        if cli.execute {
-            if let Err(e) = executor::execute_commands(&parsed, cli.force) {
-                eprintln!("{} {e}", "Error:".red().bold());
-                std::process::exit(1);
-            }
-        }
-        return;
-    }
 
     eprintln!("{} Gathering git context...", "●".cyan());
     let git_context = GitContext::gather();
@@ -77,20 +60,32 @@ async fn main() {
         );
     }
 
-    let full_prompt = prompt::build_prompt(&resolved_task, &git_context);
+    let selected_model = config.select_model(&resolved_task);
+    let complexity = if config::is_complex_task(&resolved_task) {
+        "complex → smart model"
+    } else {
+        "simple → fast model"
+    };
+
+    let system_prompt = prompt::build_system_prompt();
+    let user_prompt = prompt::build_user_prompt(&resolved_task, &git_context);
 
     if cli.verbose {
-        eprintln!("\n{}\n{}\n", "── Prompt ──".dimmed(), full_prompt.dimmed());
+        eprintln!("\n{}\n{}\n\n{}\n{}\n",
+            "── System ──".dimmed(), system_prompt.dimmed(),
+            "── User ──".dimmed(), user_prompt.dimmed(),
+        );
     }
 
     eprintln!(
-        "{} Asking {} for git commands...\n",
+        "{} Asking {} ({}) for git commands...\n",
         "●".cyan(),
-        config.model.bold()
+        selected_model.bold(),
+        complexity.dimmed()
     );
 
     let response =
-        match ollama::generate(&config.endpoint, &config.model, &full_prompt, &config.keep_alive)
+        match ollama::generate(&config.endpoint, &selected_model, &system_prompt, &user_prompt, &config.keep_alive)
             .await
         {
             Ok(r) => r,
@@ -120,9 +115,10 @@ fn handle_config(model: Option<String>, endpoint: Option<String>) {
     if model.is_none() && endpoint.is_none() {
         let config = Config::load();
         println!("{}", "Current configuration:".bold());
-        println!("  model      = {}", config.model.green());
-        println!("  endpoint   = {}", config.endpoint.green());
-        println!("  keep_alive = {}", config.keep_alive.green());
+        println!("  model_fast  = {}", config.model_fast.green());
+        println!("  model_smart = {}", config.model_smart.green());
+        println!("  endpoint    = {}", config.endpoint.green());
+        println!("  keep_alive  = {}", config.keep_alive.green());
         if !config.aliases.is_empty() {
             println!("  {}", "aliases:".bold());
             for (alias, expansion) in &config.aliases {
@@ -130,15 +126,15 @@ fn handle_config(model: Option<String>, endpoint: Option<String>) {
             }
         }
         if let Some(path) = Config::config_path() {
-            println!("  file       = {}", path.display().to_string().dimmed());
+            println!("  file        = {}", path.display().to_string().dimmed());
         }
         return;
     }
 
     let mut config = Config::load();
     if let Some(m) = model {
-        println!("  model    → {}", m.green());
-        config.model = m;
+        println!("  model → {}", m.green());
+        config.model = Some(m);
     }
     if let Some(e) = endpoint {
         println!("  endpoint → {}", e.green());
@@ -157,47 +153,33 @@ fn handle_config(model: Option<String>, endpoint: Option<String>) {
 fn print_examples() {
     println!("{}", "git-cli — Example Tasks".bold().underline());
     println!();
-    println!("{}", "Basics:".cyan().bold());
+    println!("{}", "Basics (fast model):".cyan().bold());
     println!("  git-cli \"show status\"");
     println!("  git-cli \"show diff\"");
     println!("  git-cli \"show recent commits\"");
     println!();
-    println!("{}", "Branching:".cyan().bold());
+    println!("{}", "Branching (fast model):".cyan().bold());
     println!("  git-cli \"create branch feature/auth\"");
     println!("  git-cli \"switch to main\"");
     println!("  git-cli \"delete branch old-feature\"");
-    println!("  git-cli \"list all branches\"");
     println!();
-    println!("{}", "Staging & Committing:".cyan().bold());
+    println!("{}", "Staging & Committing (fast model):".cyan().bold());
     println!("  git-cli \"stage all changes\"");
     println!("  git-cli \"amend last commit\"");
     println!("  git-cli \"unstage everything\"");
     println!();
-    println!("{}", "History & Undoing:".cyan().bold());
+    println!("{}", "History & Undoing (fast model):".cyan().bold());
     println!("  git-cli \"undo my last commit\"");
-    println!("  git-cli \"squash last 3 commits\"");
     println!("  git-cli \"discard all changes\"");
     println!();
-    println!("{}", "Remote:".cyan().bold());
-    println!("  git-cli \"pull latest changes\"");
-    println!("  git-cli \"push and set upstream\"");
-    println!("  git-cli \"fetch all remotes\"");
-    println!();
-    println!("{}", "Stash:".cyan().bold());
-    println!("  git-cli \"stash changes\"");
-    println!("  git-cli \"pop stash\"");
-    println!("  git-cli \"list stashes\"");
-    println!();
-    println!("{}", "Advanced (uses LLM):".cyan().bold());
+    println!("{}", "Advanced (auto-switches to smart model):".cyan().bold());
+    println!("  git-cli \"squash last 3 commits\"");
+    println!("  git-cli \"rewrite all commit messages to use conventional format\"");
     println!("  git-cli \"cherry-pick commit abc123 onto this branch\"");
-    println!("  git-cli \"rebase this branch onto main resolving conflicts\"");
-    println!("  git-cli \"set up git hooks for pre-commit linting\"");
+    println!("  git-cli \"rebase this branch onto main\"");
     println!();
     println!("{}", "Tips:".dimmed());
     println!("  {} to execute commands after review", "--execute / -x".bold());
     println!("  {} to allow destructive commands", "--force".bold());
-    println!(
-        "  {} to define shortcuts in ~/.git-cli.toml",
-        "aliases".bold()
-    );
+    println!("  {} to override model selection", "--model / -m".bold());
 }
