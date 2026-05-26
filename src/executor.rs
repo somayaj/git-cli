@@ -56,7 +56,7 @@ pub fn parse_response(response: &str) -> ParsedOutput {
     ParsedOutput { lines }
 }
 
-fn sanitize_response(response: &str) -> String {
+pub fn sanitize_response(response: &str) -> String {
     let mut result = response.to_string();
 
     result = result.replace("```bash", "");
@@ -80,7 +80,7 @@ fn sanitize_response(response: &str) -> String {
     fix_case_globs(&joined)
 }
 
-fn fix_case_globs(cmd: &str) -> String {
+pub fn fix_case_globs(cmd: &str) -> String {
     if let Ok(re) = Regex::new(r"([0-9a-f]{7,40})\)") {
         re.replace_all(cmd, "${1}*)").to_string()
     } else {
@@ -88,7 +88,7 @@ fn fix_case_globs(cmd: &str) -> String {
     }
 }
 
-fn join_multiline_commands(lines: &[String]) -> Vec<String> {
+pub fn join_multiline_commands(lines: &[String]) -> Vec<String> {
     let mut merged: Vec<String> = Vec::new();
     let mut accumulator = String::new();
     let mut in_single;
@@ -129,7 +129,7 @@ fn join_multiline_commands(lines: &[String]) -> Vec<String> {
     merged
 }
 
-fn strip_numbering(line: &str) -> Option<&str> {
+pub fn strip_numbering(line: &str) -> Option<&str> {
     let bytes = line.as_bytes();
     let mut i = 0;
 
@@ -155,7 +155,7 @@ fn strip_numbering(line: &str) -> Option<&str> {
     None
 }
 
-fn is_cherry_pick_in_pr_context(cmd: &str, full_response: &str) -> bool {
+pub fn is_cherry_pick_in_pr_context(cmd: &str, full_response: &str) -> bool {
     if !cmd.contains("cherry-pick") {
         return false;
     }
@@ -163,7 +163,7 @@ fn is_cherry_pick_in_pr_context(cmd: &str, full_response: &str) -> bool {
     lower.contains("gh pr create") || lower.contains("gh pr merge")
 }
 
-fn is_checkout_for_cherry_pick(cmd: &str, full_response: &str) -> bool {
+pub fn is_checkout_for_cherry_pick(cmd: &str, full_response: &str) -> bool {
     if !cmd.starts_with("git checkout ") {
         return false;
     }
@@ -171,7 +171,7 @@ fn is_checkout_for_cherry_pick(cmd: &str, full_response: &str) -> bool {
     lower.contains("cherry-pick") && (lower.contains("gh pr create") || lower.contains("gh pr merge"))
 }
 
-fn strip_inline_comment(cmd: &str) -> String {
+pub fn strip_inline_comment(cmd: &str) -> String {
     if let Some(pos) = find_unquoted_hash(cmd) {
         cmd[..pos].trim().to_string()
     } else {
@@ -179,7 +179,7 @@ fn strip_inline_comment(cmd: &str) -> String {
     }
 }
 
-fn find_unquoted_hash(cmd: &str) -> Option<usize> {
+pub fn find_unquoted_hash(cmd: &str) -> Option<usize> {
     let mut in_single = false;
     let mut in_double = false;
     let chars: Vec<char> = cmd.chars().collect();
@@ -200,12 +200,12 @@ fn find_unquoted_hash(cmd: &str) -> Option<usize> {
     None
 }
 
-fn has_placeholder(cmd: &str) -> bool {
+pub fn has_placeholder(cmd: &str) -> bool {
     let unquoted = strip_quoted_sections(cmd);
     unquoted.contains('<') && unquoted.contains('>')
 }
 
-fn strip_pipe_suffix(cmd: &str) -> String {
+pub fn strip_pipe_suffix(cmd: &str) -> String {
     let unquoted = strip_quoted_sections(cmd);
     if unquoted.contains('|') {
         let original_pos = find_unquoted_pipe(cmd);
@@ -223,7 +223,7 @@ fn strip_pipe_suffix(cmd: &str) -> String {
     cmd.to_string()
 }
 
-fn find_unquoted_pipe(cmd: &str) -> Option<usize> {
+pub fn find_unquoted_pipe(cmd: &str) -> Option<usize> {
     let mut in_single = false;
     let mut in_double = false;
     for (i, ch) in cmd.chars().enumerate() {
@@ -237,7 +237,7 @@ fn find_unquoted_pipe(cmd: &str) -> Option<usize> {
     None
 }
 
-fn is_safe_command(cmd: &str) -> bool {
+pub fn is_safe_command(cmd: &str) -> bool {
     if !cmd.starts_with("git ") && !cmd.starts_with("gh ") {
         return false;
     }
@@ -325,7 +325,7 @@ fn is_safe_command(cmd: &str) -> bool {
     true
 }
 
-fn strip_quoted_sections(cmd: &str) -> String {
+pub fn strip_quoted_sections(cmd: &str) -> String {
     let mut result = String::new();
     let mut in_single = false;
     let mut in_double = false;
@@ -347,7 +347,7 @@ fn strip_quoted_sections(cmd: &str) -> String {
     result
 }
 
-fn extract_head_offset(cmd: &str) -> Option<u32> {
+pub fn extract_head_offset(cmd: &str) -> Option<u32> {
     Regex::new(r"HEAD~(\d+)")
         .ok()?
         .captures(cmd)
@@ -365,7 +365,7 @@ fn get_commit_count() -> u32 {
         .unwrap_or(0)
 }
 
-fn shell_split(cmd: &str) -> Vec<String> {
+pub fn shell_split(cmd: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
     let mut in_single_quote = false;
@@ -484,6 +484,16 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
                 } else {
                     cmd_str.to_string()
                 }
+            } else if !created_prs.is_empty() {
+                // No PR number given — inject the last created PR number
+                let last_pr = created_prs[created_prs.len() - 1];
+                let fixed = cmd_str.replacen("gh pr merge", &format!("gh pr merge {}", last_pr), 1);
+                eprintln!(
+                    "  {} Injecting PR #{} (last created)",
+                    "Auto:".cyan().bold(),
+                    last_pr
+                );
+                fixed
             } else {
                 cmd_str.to_string()
             }
@@ -696,7 +706,7 @@ fn run_with_flag_retry(cmd: &str) -> Result<(std::process::Output, String), Stri
     Ok((output, current_cmd))
 }
 
-fn extract_bad_flag(stderr: &str) -> Option<String> {
+pub fn extract_bad_flag(stderr: &str) -> Option<String> {
     for line in stderr.lines() {
         let line = line.trim();
         if line.contains("unrecognized argument:") {
@@ -729,7 +739,7 @@ fn extract_bad_flag(stderr: &str) -> Option<String> {
     None
 }
 
-fn remove_flag(cmd: &str, flag: &str) -> String {
+pub fn remove_flag(cmd: &str, flag: &str) -> String {
     if flag == "__strip_trailing_arg__" {
         let parts = shell_split(cmd);
         if parts.len() > 1 {
@@ -850,7 +860,7 @@ fn auto_merge_remaining_prs() {
     }
 }
 
-fn extract_head_branch(cmd: &str) -> Option<String> {
+pub fn extract_head_branch(cmd: &str) -> Option<String> {
     let parts = shell_split(cmd);
     for (i, part) in parts.iter().enumerate() {
         if part == "--head" {
@@ -860,7 +870,7 @@ fn extract_head_branch(cmd: &str) -> Option<String> {
     None
 }
 
-fn extract_pr_merge_number(cmd: &str) -> Option<u32> {
+pub fn extract_pr_merge_number(cmd: &str) -> Option<u32> {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     if parts.len() >= 4 && parts[0] == "gh" && parts[1] == "pr" && parts[2] == "merge" {
         parts[3].parse().ok()
@@ -869,7 +879,7 @@ fn extract_pr_merge_number(cmd: &str) -> Option<u32> {
     }
 }
 
-fn parse_pr_number_from_output(output: &str) -> Option<u32> {
+pub fn parse_pr_number_from_output(output: &str) -> Option<u32> {
     for line in output.lines() {
         let trimmed = line.trim();
         if trimmed.contains("/pull/") {
@@ -896,3 +906,4 @@ fn get_open_pr_numbers() -> Vec<u32> {
         })
         .unwrap_or_default()
 }
+
