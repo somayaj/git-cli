@@ -1,5 +1,6 @@
 use colored::Colorize;
 use regex::Regex;
+use std::collections::HashMap;
 use std::process::Command;
 
 pub struct ParsedOutput {
@@ -178,6 +179,28 @@ fn is_safe_command(cmd: &str) -> bool {
         }
     }
 
+    if cmd.contains("git push") && cmd.contains(':') {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if let Some(refspec) = parts.last() {
+            if refspec.contains(':') && !refspec.contains("refs/tags/") {
+                eprintln!(
+                    "  {} Blocked push with refspec `{}`. Use `git push origin <branch>` and `gh pr create` instead.",
+                    "Warning:".yellow().bold(),
+                    refspec
+                );
+                return false;
+            }
+        }
+    }
+
+    if cmd.contains("rebase -i") || cmd.contains("rebase --interactive") {
+        eprintln!(
+            "  {} Blocked `rebase -i` (no interactive editor available). Use `git reset --soft` or `git filter-branch`.",
+            "Warning:".yellow().bold(),
+        );
+        return false;
+    }
+
     // Block commit with trailing bare hash references (LLM hallucination)
     if cmd.contains("git commit") {
         if let Ok(re) = Regex::new(r"[0-9a-f]{7,}\^?\s*$") {
@@ -335,10 +358,50 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
         return Ok(());
     }
 
-    for cmd_str in commands {
-        println!("  {} {}", "Running:".cyan().bold(), cmd_str);
+    let has_creates = commands.iter().any(|c| c.starts_with("gh pr create"));
+    let has_merges = commands.iter().any(|c| c.starts_with("gh pr merge"));
 
-        let parts = shell_split(cmd_str);
+    let mut pr_number_map: HashMap<u32, u32> = HashMap::new();
+    let mut created_prs: Vec<u32> = Vec::new();
+
+    let predicted_merge_numbers: Vec<u32> = if has_creates && has_merges {
+        let open_prs = get_open_pr_numbers();
+        commands
+            .iter()
+            .filter_map(|c| extract_pr_merge_number(c))
+            .filter(|n| !open_prs.contains(n))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let mut failed_cmds: Vec<String> = Vec::new();
+
+    for cmd_str in commands {
+        let actual_cmd = if cmd_str.starts_with("gh pr merge") {
+            if let Some(n) = extract_pr_merge_number(cmd_str) {
+                if let Some(&actual) = pr_number_map.get(&n) {
+                    let replaced = cmd_str.replacen(&n.to_string(), &actual.to_string(), 1);
+                    eprintln!(
+                        "  {} PR #{} → #{} (actual)",
+                        "Remapped:".yellow().bold(),
+                        n,
+                        actual
+                    );
+                    replaced
+                } else {
+                    cmd_str.to_string()
+                }
+            } else {
+                cmd_str.to_string()
+            }
+        } else {
+            cmd_str.to_string()
+        };
+
+        println!("  {} {}", "Running:".cyan().bold(), actual_cmd);
+
+        let parts = shell_split(&actual_cmd);
         if parts.is_empty() {
             continue;
         }
@@ -346,7 +409,7 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
         let output = Command::new(&parts[0])
             .args(&parts[1..])
             .output()
-            .map_err(|e| format!("Failed to run `{cmd_str}`: {e}"))?;
+            .map_err(|e| format!("Failed to run `{actual_cmd}`: {e}"))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -359,13 +422,154 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
         }
 
         if !output.status.success() {
+            let is_gh_merge = actual_cmd.starts_with("gh pr merge");
+            let is_gh_create = actual_cmd.starts_with("gh pr create");
+
+            if is_gh_merge {
+                let stderr_str = stderr.to_string();
+                if stderr_str.contains("not allowed") || stderr_str.contains("not mergeable") {
+                    if retry_merge_with_fallback(&actual_cmd).is_some() {
+                        continue;
+                    }
+                }
+                eprintln!(
+                    "  {} `{}` failed (exit code {}). Continuing with remaining commands...",
+                    "Skipped:".yellow().bold(),
+                    actual_cmd,
+                    output.status.code().unwrap_or(-1)
+                );
+                failed_cmds.push(actual_cmd);
+                continue;
+            }
+
+            if is_gh_create {
+                eprintln!(
+                    "  {} `{}` failed (exit code {}). Continuing with remaining commands...",
+                    "Skipped:".yellow().bold(),
+                    actual_cmd,
+                    output.status.code().unwrap_or(-1)
+                );
+                failed_cmds.push(actual_cmd);
+                continue;
+            }
+
+            let is_push_to_existing = actual_cmd.starts_with("git push")
+                && (stderr.contains("non-fast-forward") || stderr.contains("already exists"));
+            if is_push_to_existing {
+                eprintln!(
+                    "  {} Push failed but branch likely exists on remote. Continuing...",
+                    "Note:".yellow().bold(),
+                );
+                continue;
+            }
+
             return Err(format!(
-                "Command `{cmd_str}` failed with exit code {}",
+                "Command `{actual_cmd}` failed with exit code {}",
                 output.status.code().unwrap_or(-1)
             ));
         }
+
+        if cmd_str.starts_with("gh pr create") {
+            if let Some(pr_num) = parse_pr_number_from_output(&stdout) {
+                let idx = created_prs.len();
+                created_prs.push(pr_num);
+                if let Some(&predicted) = predicted_merge_numbers.get(idx) {
+                    pr_number_map.insert(predicted, pr_num);
+                }
+            }
+        }
     }
 
-    println!("  {}", "All commands completed successfully.".green().bold());
+    if failed_cmds.is_empty() {
+        println!("  {}", "All commands completed successfully.".green().bold());
+    } else {
+        eprintln!();
+        eprintln!(
+            "  {} {} command(s) failed:",
+            "Summary:".yellow().bold(),
+            failed_cmds.len()
+        );
+        for cmd in &failed_cmds {
+            eprintln!("    {} {}", "✗".red(), cmd);
+        }
+        eprintln!();
+        return Err(format!("{} command(s) failed (see above)", failed_cmds.len()));
+    }
+
     Ok(())
+}
+
+fn retry_merge_with_fallback(original_cmd: &str) -> Option<()> {
+    let strategies = ["--squash", "--rebase"];
+    for strategy in &strategies {
+        let retry_cmd = original_cmd
+            .replace("--merge", strategy);
+        eprintln!(
+            "  {} Retrying with `{}`...",
+            "Fallback:".cyan().bold(),
+            strategy
+        );
+        let parts = shell_split(&retry_cmd);
+        if parts.is_empty() {
+            continue;
+        }
+        let output = Command::new(&parts[0])
+            .args(&parts[1..])
+            .output()
+            .ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stdout.trim().is_empty() {
+            println!("{stdout}");
+        }
+        if !stderr.trim().is_empty() {
+            eprintln!("{stderr}");
+        }
+        if output.status.success() {
+            eprintln!(
+                "  {} Merged successfully with `{}`",
+                "OK:".green().bold(),
+                strategy
+            );
+            return Some(());
+        }
+    }
+    None
+}
+
+fn extract_pr_merge_number(cmd: &str) -> Option<u32> {
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    if parts.len() >= 4 && parts[0] == "gh" && parts[1] == "pr" && parts[2] == "merge" {
+        parts[3].parse().ok()
+    } else {
+        None
+    }
+}
+
+fn parse_pr_number_from_output(output: &str) -> Option<u32> {
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.contains("/pull/") {
+            return trimmed.rsplit('/').next()?.parse().ok();
+        }
+    }
+    None
+}
+
+fn get_open_pr_numbers() -> Vec<u32> {
+    Command::new("gh")
+        .args([
+            "pr", "list", "--state", "open", "--json", "number",
+            "--template", "{{range .}}{{.number}}\n{{end}}",
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter_map(|l| l.trim().parse().ok())
+                .collect()
+        })
+        .unwrap_or_default()
 }
