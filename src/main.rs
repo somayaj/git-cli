@@ -4,7 +4,7 @@ mod context;
 mod executor;
 mod ollama;
 mod prompt;
-mod shortcuts;
+
 
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
