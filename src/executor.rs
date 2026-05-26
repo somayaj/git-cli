@@ -68,7 +68,48 @@ fn sanitize_response(response: &str) -> String {
         })
         .collect();
 
-    lines.join("\n")
+    join_multiline_commands(&lines).join("\n")
+}
+
+fn join_multiline_commands(lines: &[String]) -> Vec<String> {
+    let mut merged: Vec<String> = Vec::new();
+    let mut accumulator = String::new();
+    let mut open_single = false;
+    let mut open_double = false;
+
+    for line in lines {
+        if accumulator.is_empty() {
+            if line.trim().starts_with('#') || line.trim().is_empty() {
+                merged.push(line.clone());
+                continue;
+            }
+            accumulator = line.clone();
+        } else {
+            accumulator.push(' ');
+            accumulator.push_str(line.trim());
+        }
+
+        open_single = false;
+        open_double = false;
+        for ch in accumulator.chars() {
+            match ch {
+                '\'' if !open_double => open_single = !open_single,
+                '"' if !open_single => open_double = !open_double,
+                _ => {}
+            }
+        }
+
+        if !open_single && !open_double {
+            merged.push(accumulator.clone());
+            accumulator.clear();
+        }
+    }
+
+    if !accumulator.is_empty() {
+        merged.push(accumulator);
+    }
+
+    merged
 }
 
 fn strip_numbering(line: &str) -> Option<&str> {
