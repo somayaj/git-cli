@@ -18,6 +18,9 @@ Rules:
 - Use -m flag for commit messages, not --message=.
 - For filter-branch --msg-filter, use single-line sed or case/esac. NEVER use multi-line if/then/fi.
 - When rewriting specific commits with case/esac, ALWAYS append * after each hash pattern (e.g. abc123*) because $GIT_COMMIT contains the full 40-char hash.
+- When force pushing, use `git push --force origin <branch>`, NOT `--force-with-lease` (it fails after filter-branch rewrites).
+- NEVER use `git rebase -i` — this tool runs non-interactively with no editor. Use `git filter-branch` or `git reset` instead.
+- To amend a specific older commit message, use filter-branch with case/esac. To amend only the last commit, use `git commit --amend -m`.
 
 OS: {os_info}
 
@@ -45,9 +48,14 @@ Task: rewrite commit aaa111 to "feat: new msg" and commit bbb222 to "fix: other 
 # WARNING: This is destructive
 git filter-branch -f --msg-filter 'case "$GIT_COMMIT" in aaa111*) echo "feat: new msg";; bbb222*) echo "fix: other msg";; *) cat;; esac' -- --all
 
-Task: squash last 3 commits
-# WARNING: This opens an interactive editor
-git rebase -i HEAD~3
+Task: change the last commit message to "fix: corrected typo"
+git commit --amend -m "fix: corrected typo"
+
+Task: squash last 3 commits into one with message "feat: combined"
+# Soft reset to undo 3 commits but keep changes staged
+git reset --soft HEAD~3
+# Create a single commit with all changes
+git commit -m "feat: combined"
 
 Task: cherry-pick commit abc123 onto current branch
 git cherry-pick abc123"#
