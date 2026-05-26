@@ -406,10 +406,7 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
             continue;
         }
 
-        let output = Command::new(&parts[0])
-            .args(&parts[1..])
-            .output()
-            .map_err(|e| format!("Failed to run `{actual_cmd}`: {e}"))?;
+        let (output, actual_cmd) = run_with_flag_retry(&actual_cmd)?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -497,6 +494,73 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
     }
 
     Ok(())
+}
+
+fn run_with_flag_retry(cmd: &str) -> Result<(std::process::Output, String), String> {
+    let mut current_cmd = cmd.to_string();
+    for _ in 0..3 {
+        let parts = shell_split(&current_cmd);
+        if parts.is_empty() {
+            return Err("Empty command".to_string());
+        }
+        let output = Command::new(&parts[0])
+            .args(&parts[1..])
+            .output()
+            .map_err(|e| format!("Failed to run `{current_cmd}`: {e}"))?;
+
+        if output.status.success() {
+            return Ok((output, current_cmd));
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if let Some(bad_flag) = extract_bad_flag(&stderr) {
+            eprintln!(
+                "  {} Removing hallucinated flag `{}`",
+                "Fix:".yellow().bold(),
+                bad_flag
+            );
+            current_cmd = remove_flag(&current_cmd, &bad_flag);
+            println!("  {} {}", "Retrying:".cyan().bold(), current_cmd);
+        } else {
+            return Ok((output, current_cmd));
+        }
+    }
+    let parts = shell_split(&current_cmd);
+    let output = Command::new(&parts[0])
+        .args(&parts[1..])
+        .output()
+        .map_err(|e| format!("Failed to run `{current_cmd}`: {e}"))?;
+    Ok((output, current_cmd))
+}
+
+fn extract_bad_flag(stderr: &str) -> Option<String> {
+    for line in stderr.lines() {
+        let line = line.trim();
+        if line.contains("unrecognized argument:") {
+            return line.split("unrecognized argument:").nth(1)
+                .map(|s| s.trim().to_string());
+        }
+        if line.contains("unknown option:") {
+            return line.split("unknown option:").nth(1)
+                .map(|s| s.trim().trim_matches('\'').to_string());
+        }
+        if line.contains("unknown switch") {
+            if let Some(flag) = line.split('`').nth(1) {
+                return Some(flag.trim_matches('\'').to_string());
+            }
+        }
+    }
+    None
+}
+
+fn remove_flag(cmd: &str, flag: &str) -> String {
+    let flag_with_space = format!(" {}", flag);
+    let result = cmd.replace(&flag_with_space, "");
+    if result == cmd {
+        cmd.replace(flag, "").replace("  ", " ")
+    } else {
+        result
+    }
 }
 
 fn retry_merge_with_fallback(original_cmd: &str) -> Option<()> {
