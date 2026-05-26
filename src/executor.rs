@@ -35,8 +35,14 @@ pub fn parse_response(response: &str) -> ParsedOutput {
             if trimmed.starts_with('#') {
                 OutputLine::Comment(trimmed.to_string())
             } else if trimmed.starts_with("git ") || trimmed.starts_with("gh ") {
-                let sanitized = strip_pipe_suffix(trimmed);
-                if is_safe_command(&sanitized) {
+                let sanitized = strip_inline_comment(&strip_pipe_suffix(trimmed));
+                if has_placeholder(&sanitized) {
+                    OutputLine::Other(format!("[BLOCKED placeholder] {trimmed}"))
+                } else if is_cherry_pick_in_pr_context(&sanitized, &cleaned) {
+                    OutputLine::Other(format!("[BLOCKED cherry-pick] {trimmed} — use `gh pr create` with different --base instead"))
+                } else if is_checkout_for_cherry_pick(&sanitized, &cleaned) {
+                    OutputLine::Other(format!("[BLOCKED checkout] {trimmed} — not needed for PR workflow"))
+                } else if is_safe_command(&sanitized) {
                     OutputLine::GitCommand(sanitized)
                 } else {
                     OutputLine::Other(format!("[BLOCKED] {trimmed}"))
@@ -149,6 +155,56 @@ fn strip_numbering(line: &str) -> Option<&str> {
     None
 }
 
+fn is_cherry_pick_in_pr_context(cmd: &str, full_response: &str) -> bool {
+    if !cmd.contains("cherry-pick") {
+        return false;
+    }
+    let lower = full_response.to_lowercase();
+    lower.contains("gh pr create") || lower.contains("gh pr merge")
+}
+
+fn is_checkout_for_cherry_pick(cmd: &str, full_response: &str) -> bool {
+    if !cmd.starts_with("git checkout ") {
+        return false;
+    }
+    let lower = full_response.to_lowercase();
+    lower.contains("cherry-pick") && (lower.contains("gh pr create") || lower.contains("gh pr merge"))
+}
+
+fn strip_inline_comment(cmd: &str) -> String {
+    if let Some(pos) = find_unquoted_hash(cmd) {
+        cmd[..pos].trim().to_string()
+    } else {
+        cmd.to_string()
+    }
+}
+
+fn find_unquoted_hash(cmd: &str) -> Option<usize> {
+    let mut in_single = false;
+    let mut in_double = false;
+    let chars: Vec<char> = cmd.chars().collect();
+    for (i, &ch) in chars.iter().enumerate() {
+        match ch {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '#' if !in_single && !in_double && i > 0 => {
+                let next = chars.get(i + 1);
+                let prev = chars.get(i - 1);
+                if prev == Some(&' ') && !next.map_or(false, |c| c.is_ascii_digit()) {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn has_placeholder(cmd: &str) -> bool {
+    let unquoted = strip_quoted_sections(cmd);
+    unquoted.contains('<') && unquoted.contains('>')
+}
+
 fn strip_pipe_suffix(cmd: &str) -> String {
     let unquoted = strip_quoted_sections(cmd);
     if unquoted.contains('|') {
@@ -215,7 +271,9 @@ fn is_safe_command(cmd: &str) -> bool {
     if cmd.contains("git push") && cmd.contains(':') {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         if let Some(refspec) = parts.last() {
-            if refspec.contains(':') && !refspec.contains("refs/tags/") {
+            if refspec.starts_with(':') {
+                // `:branch` is valid delete syntax — allow it
+            } else if refspec.contains(':') && !refspec.contains("refs/tags/") {
                 eprintln!(
                     "  {} Blocked push with refspec `{}`. Use `git push origin <branch>` and `gh pr create` instead.",
                     "Warning:".yellow().bold(),
@@ -409,6 +467,7 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
     };
 
     let mut failed_cmds: Vec<String> = Vec::new();
+    let mut branch_pushed = false;
 
     for cmd_str in commands {
         let actual_cmd = if cmd_str.starts_with("gh pr merge") {
@@ -431,6 +490,22 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
         } else {
             cmd_str.to_string()
         };
+
+        if actual_cmd.starts_with("gh pr create") && !branch_pushed {
+            if let Some(branch) = extract_head_branch(&actual_cmd) {
+                eprintln!("  {} Pushing branch `{}` to remote first...", "Auto:".cyan().bold(), branch);
+                let push_out = Command::new("git")
+                    .args(["push", "origin", &branch])
+                    .output();
+                if let Ok(o) = &push_out {
+                    let out = String::from_utf8_lossy(&o.stdout);
+                    let err = String::from_utf8_lossy(&o.stderr);
+                    if !out.trim().is_empty() { println!("{out}"); }
+                    if !err.trim().is_empty() { eprintln!("{err}"); }
+                }
+                branch_pushed = true;
+            }
+        }
 
         println!("  {} {}", "Running:".cyan().bold(), actual_cmd);
 
@@ -493,6 +568,16 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
                 continue;
             }
 
+            let is_branch_delete = actual_cmd.contains("branch -D") || actual_cmd.contains("branch -d")
+                || (actual_cmd.contains("push origin --delete") || actual_cmd.contains("push origin :"));
+            if is_branch_delete {
+                eprintln!(
+                    "  {} Branch may already be deleted. Continuing...",
+                    "Note:".yellow().bold(),
+                );
+                continue;
+            }
+
             return Err(format!(
                 "Command `{actual_cmd}` failed with exit code {}",
                 output.status.code().unwrap_or(-1)
@@ -508,6 +593,10 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
                 }
             }
         }
+    }
+
+    if has_creates || has_merges {
+        auto_merge_remaining_prs();
     }
 
     if failed_cmds.is_empty() {
@@ -573,9 +662,18 @@ fn extract_bad_flag(stderr: &str) -> Option<String> {
             return line.split("unrecognized argument:").nth(1)
                 .map(|s| s.trim().to_string());
         }
-        if line.contains("unknown option:") {
-            return line.split("unknown option:").nth(1)
-                .map(|s| s.trim().trim_matches('\'').to_string());
+        if line.contains("unknown option") {
+            if let Some(flag) = line.split("unknown option").nth(1) {
+                let cleaned = flag.trim()
+                    .trim_start_matches(':')
+                    .trim()
+                    .trim_matches('\'')
+                    .trim_matches('`')
+                    .trim();
+                if !cleaned.is_empty() {
+                    return Some(format!("--{}", cleaned));
+                }
+            }
         }
         if line.contains("unknown switch") {
             if let Some(flag) = line.split('`').nth(1) {
@@ -629,6 +727,78 @@ fn retry_merge_with_fallback(original_cmd: &str) -> Option<()> {
                 strategy
             );
             return Some(());
+        }
+    }
+    None
+}
+
+fn auto_merge_remaining_prs() {
+    let current_branch = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
+    let Some(branch) = current_branch else { return };
+
+    let pr_output = Command::new("gh")
+        .args([
+            "pr", "list", "--state", "open", "--head", &branch,
+            "--json", "number", "--template", "{{range .}}{{.number}}\n{{end}}",
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string());
+
+    let Some(prs) = pr_output else { return };
+    let pr_numbers: Vec<u32> = prs.lines().filter_map(|l| l.trim().parse().ok()).collect();
+
+    if pr_numbers.is_empty() {
+        return;
+    }
+
+    eprintln!(
+        "\n  {} {} open PR(s) remaining for `{}`, merging...",
+        "Auto-merge:".cyan().bold(),
+        pr_numbers.len(),
+        branch
+    );
+
+    for (i, pr) in pr_numbers.iter().enumerate() {
+        let is_last = i == pr_numbers.len() - 1;
+        let mut args = vec!["pr".to_string(), "merge".to_string(), pr.to_string()];
+        args.push("--squash".to_string());
+        if is_last {
+            args.push("--delete-branch".to_string());
+        }
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        eprintln!("  {} gh pr merge {} --squash{}", "Running:".cyan().bold(), pr,
+            if is_last { " --delete-branch" } else { "" });
+
+        let output = Command::new("gh").args(&arg_refs).output();
+        if let Ok(o) = output {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            if !stdout.trim().is_empty() { println!("{stdout}"); }
+            if !stderr.trim().is_empty() { eprintln!("{stderr}"); }
+            if !o.status.success() {
+                eprintln!("  {} PR #{} merge failed, trying --rebase...", "Fallback:".yellow().bold(), pr);
+                let pr_str = pr.to_string();
+                let mut retry_args = vec!["pr", "merge", &pr_str, "--rebase"];
+                if is_last { retry_args.push("--delete-branch"); }
+                let _ = Command::new("gh").args(&retry_args).output();
+            }
+        }
+    }
+}
+
+fn extract_head_branch(cmd: &str) -> Option<String> {
+    let parts = shell_split(cmd);
+    for (i, part) in parts.iter().enumerate() {
+        if part == "--head" {
+            return parts.get(i + 1).cloned();
         }
     }
     None

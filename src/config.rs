@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 const DEFAULT_MODEL_FAST: &str = "qwen2.5:3b";
-const DEFAULT_MODEL_SMART: &str = "mistral:7b-instruct-q4_0";
+const DEFAULT_MODEL_SMART: &str = "qwen2.5:3b";
 const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
 const DEFAULT_KEEP_ALIVE: &str = "10m";
 
