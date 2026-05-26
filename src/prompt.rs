@@ -20,6 +20,7 @@ Rules:
 - When force pushing, use `git push --force origin <branch>`, NOT `--force-with-lease` (it fails after filter-branch rewrites).
 - NEVER use `git rebase -i` — this tool runs non-interactively with no editor. For squashing use `git reset --soft` + `git commit`. For rewording use `git filter-branch` or `git commit --amend -m`.
 - NEVER use placeholder values like abc123, def456, PR-NUMBER, etc. ONLY use real commit hashes, branch names, and PR numbers from the repository state provided.
+- NEVER use shell pipes (|), subshells ($(...)), or chained commands (&&, ;). Use git's built-in flags instead (e.g. `git rev-list --count` instead of `git log | wc -l`).
 - The repository state below includes all branches and open PRs — use this information.
 
 PR Rules (CRITICAL — follow exactly):
@@ -72,6 +73,14 @@ git commit -m "feat: combined"
 
 Task: cherry-pick commit abc123 onto current branch
 git cherry-pick abc123
+
+Task: how many commits since yesterday on v15.3
+# Count commits on v15.3 since yesterday
+git rev-list --count --since=yesterday remotes/origin/v15.3
+
+Task: who are the committers on v15.3 branch
+# List unique committers on v15.3
+git log --format='%an' remotes/origin/v15.3 --no-merges
 
 Task: create PRs from feature/my-change to v15.3, v15, and main and merge them
 (Open PRs show: #11 feature/my-change → main "feat: my change")
