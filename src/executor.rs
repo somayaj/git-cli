@@ -527,6 +527,27 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
         }
 
         if !output.status.success() {
+            // git checkout -b fails when branch already exists → retry without -b
+            if actual_cmd.starts_with("git checkout -b ")
+                && (stderr.contains("already exists") || stderr.contains("already exist"))
+            {
+                let branch = actual_cmd.trim_start_matches("git checkout -b ").trim();
+                eprintln!(
+                    "  {} Branch already exists, switching to it instead...",
+                    "Auto:".cyan().bold()
+                );
+                let retry = Command::new("git").args(["checkout", branch]).output();
+                if let Ok(o) = retry {
+                    let out = String::from_utf8_lossy(&o.stdout);
+                    let err = String::from_utf8_lossy(&o.stderr);
+                    if !out.trim().is_empty() { println!("{out}"); }
+                    if !err.trim().is_empty() { eprintln!("{err}"); }
+                    if o.status.success() {
+                        continue;
+                    }
+                }
+            }
+
             let is_gh_merge = actual_cmd.starts_with("gh pr merge");
             let is_gh_create = actual_cmd.starts_with("gh pr create");
 
@@ -568,9 +589,29 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
                 continue;
             }
 
-            let is_branch_delete = actual_cmd.contains("branch -D") || actual_cmd.contains("branch -d")
-                || (actual_cmd.contains("push origin --delete") || actual_cmd.contains("push origin :"));
+            let is_branch_delete = actual_cmd.contains("branch -D") || actual_cmd.contains("branch -d");
             if is_branch_delete {
+                if stderr.contains("checked out") || stderr.contains("Cannot delete") {
+                    eprintln!("  {} Switching to main before deleting...", "Auto:".cyan().bold());
+                    let _ = Command::new("git").args(["checkout", "main"]).output();
+                    let retry = Command::new(&parts[0]).args(&parts[1..]).output();
+                    if let Ok(o) = retry {
+                        if o.status.success() {
+                            let out = String::from_utf8_lossy(&o.stdout);
+                            if !out.trim().is_empty() { println!("{out}"); }
+                            continue;
+                        }
+                    }
+                }
+                eprintln!(
+                    "  {} Branch may already be deleted. Continuing...",
+                    "Note:".yellow().bold(),
+                );
+                continue;
+            }
+
+            let is_remote_delete = actual_cmd.contains("push origin --delete") || actual_cmd.contains("push origin :");
+            if is_remote_delete {
                 eprintln!(
                     "  {} Branch may already be deleted. Continuing...",
                     "Note:".yellow().bold(),
@@ -680,11 +721,26 @@ fn extract_bad_flag(stderr: &str) -> Option<String> {
                 return Some(flag.trim_matches('\'').to_string());
             }
         }
+        // "do not take a branch name" → git branch -r/-a was given an extra arg
+        if line.contains("do not take a branch name") {
+            return Some("__strip_trailing_arg__".to_string());
+        }
     }
     None
 }
 
 fn remove_flag(cmd: &str, flag: &str) -> String {
+    if flag == "__strip_trailing_arg__" {
+        let parts = shell_split(cmd);
+        if parts.len() > 1 {
+            let without_last = &parts[..parts.len() - 1];
+            return without_last.iter()
+                .map(|p| if p.contains(' ') { format!("\"{}\"", p) } else { p.clone() })
+                .collect::<Vec<_>>()
+                .join(" ");
+        }
+        return cmd.to_string();
+    }
     let flag_with_space = format!(" {}", flag);
     let result = cmd.replace(&flag_with_space, "");
     if result == cmd {

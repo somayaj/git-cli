@@ -23,6 +23,9 @@ Rules:
 - NEVER use shell pipes (|), subshells ($(...)), chained commands (&&, ;), for loops, xargs, or shell variables ($branch). List each command individually using real branch names from the repository state.
 - Use git's built-in flags instead of piping (e.g. `git rev-list --count` instead of `git log | wc -l`).
 - The repository state below includes all branches and open PRs — use this information.
+- When deleting a branch, first `git checkout main` (to switch off it), then delete BOTH local (`git branch -D`) AND remote (`git push origin --delete`).
+- If the task asks to BOTH create AND delete a branch (with push), the full sequence is: `git checkout -b <branch>` → `git push origin <branch>` → `git checkout main` → `git branch -D <branch>` → `git push origin --delete <branch>`. You MUST push the branch to remote BEFORE deleting it.
+- Use `git checkout -b` only for NEW branches. If the branch already exists in the branch list, use `git checkout` (without -b).
 
 PR Rules (CRITICAL — follow exactly):
 - To create a PR: `gh pr create --base <target-branch> --head <feature-branch> --title "title" --body "body"`
@@ -82,6 +85,32 @@ git rev-list --count --since=yesterday remotes/origin/v15.3
 Task: who are the committers on v15.3 branch
 # List unique committers on v15.3
 git log --format='%an' remotes/origin/v15.3 --no-merges
+
+Task: create branch feature/auth, push to remote, then delete it
+# Switch to main branch
+git checkout main
+# Create the new branch
+git checkout -b feature/auth
+# Push the branch to remote
+git push origin feature/auth
+# Switch off the branch before deleting
+git checkout main
+# Delete the local branch
+git branch -D feature/auth
+# Delete the remote branch
+git push origin --delete feature/auth
+
+Task: show remote branches
+# List all remote branches
+git branch -r
+
+Task: delete branch feature/auth
+# Switch off the branch before deleting
+git checkout main
+# Delete the local branch
+git branch -D feature/auth
+# Delete the remote branch
+git push origin --delete feature/auth
 
 Task: delete all feature branches locally and from remote
 # Prune stale remote refs first
