@@ -21,6 +21,9 @@ Rules:
 - When force pushing, use `git push --force origin <branch>`, NOT `--force-with-lease` (it fails after filter-branch rewrites).
 - NEVER use `git rebase -i` — this tool runs non-interactively with no editor. Use `git filter-branch` or `git reset` instead.
 - To amend a specific older commit message, use filter-branch with case/esac. To amend only the last commit, use `git commit --amend -m`.
+- You can also use `gh` (GitHub CLI) commands for GitHub operations like creating PRs, merging PRs, creating repos, etc.
+- To create a PR: `gh pr create --base <branch> --head <branch> --title "title" --body "body"`
+- To merge a PR: `gh pr merge <number> --merge --delete-branch`
 
 OS: {os_info}
 

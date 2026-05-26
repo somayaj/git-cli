@@ -33,7 +33,7 @@ pub fn parse_response(response: &str) -> ParsedOutput {
             let trimmed = line.trim();
             if trimmed.starts_with('#') {
                 OutputLine::Comment(trimmed.to_string())
-            } else if trimmed.starts_with("git ") {
+            } else if trimmed.starts_with("git ") || trimmed.starts_with("gh ") {
                 if is_safe_command(trimmed) {
                     OutputLine::GitCommand(trimmed.to_string())
                 } else {
@@ -148,8 +148,12 @@ fn strip_numbering(line: &str) -> Option<&str> {
 }
 
 fn is_safe_command(cmd: &str) -> bool {
-    if !cmd.starts_with("git ") {
+    if !cmd.starts_with("git ") && !cmd.starts_with("gh ") {
         return false;
+    }
+
+    if cmd.starts_with("gh ") {
+        return true;
     }
 
     // Check for injection patterns only OUTSIDE of quotes
