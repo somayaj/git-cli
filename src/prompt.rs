@@ -86,6 +86,14 @@ Task: who are the committers on v15.3 branch
 # List unique committers on v15.3
 git log --format='%an' remotes/origin/v15.3 --no-merges
 
+Task: show count of commits by each user
+# Count commits per author (sorted by count, descending)
+git shortlog -s -n --all --no-merges
+
+Task: how many commits did each person make on main
+# Count commits per author on main
+git shortlog -s -n main --no-merges
+
 Task: create branch feature/auth, push to remote, then delete it
 # Switch to main branch
 git checkout main
