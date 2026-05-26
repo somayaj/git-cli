@@ -68,7 +68,16 @@ fn sanitize_response(response: &str) -> String {
         })
         .collect();
 
-    join_multiline_commands(&lines).join("\n")
+    let joined = join_multiline_commands(&lines).join("\n");
+    fix_case_globs(&joined)
+}
+
+fn fix_case_globs(cmd: &str) -> String {
+    if let Ok(re) = Regex::new(r"([0-9a-f]{7,40})\)") {
+        re.replace_all(cmd, "${1}*)").to_string()
+    } else {
+        cmd.to_string()
+    }
 }
 
 fn join_multiline_commands(lines: &[String]) -> Vec<String> {
