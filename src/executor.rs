@@ -35,8 +35,9 @@ pub fn parse_response(response: &str) -> ParsedOutput {
             if trimmed.starts_with('#') {
                 OutputLine::Comment(trimmed.to_string())
             } else if trimmed.starts_with("git ") || trimmed.starts_with("gh ") {
-                if is_safe_command(trimmed) {
-                    OutputLine::GitCommand(trimmed.to_string())
+                let sanitized = strip_pipe_suffix(trimmed);
+                if is_safe_command(&sanitized) {
+                    OutputLine::GitCommand(sanitized)
                 } else {
                     OutputLine::Other(format!("[BLOCKED] {trimmed}"))
                 }
@@ -145,6 +146,38 @@ fn strip_numbering(line: &str) -> Option<&str> {
         }
     }
 
+    None
+}
+
+fn strip_pipe_suffix(cmd: &str) -> String {
+    let unquoted = strip_quoted_sections(cmd);
+    if unquoted.contains('|') {
+        let original_pos = find_unquoted_pipe(cmd);
+        if let Some(pos) = original_pos {
+            let stripped = cmd[..pos].trim().to_string();
+            let pipe_part = cmd[pos..].trim();
+            eprintln!(
+                "  {} Stripped `{}` (pipes not supported)",
+                "Note:".yellow().bold(),
+                pipe_part
+            );
+            return stripped;
+        }
+    }
+    cmd.to_string()
+}
+
+fn find_unquoted_pipe(cmd: &str) -> Option<usize> {
+    let mut in_single = false;
+    let mut in_double = false;
+    for (i, ch) in cmd.chars().enumerate() {
+        match ch {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '|' if !in_single && !in_double => return Some(i),
+            _ => {}
+        }
+    }
     None
 }
 
