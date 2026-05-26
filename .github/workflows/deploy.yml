@@ -1,6 +1,14 @@
-- name: Cargo Publish
-  uses: ryohidaka/action-cargo-publish@v0.1.0
-  with:
-      token: ${cargo_token}
-      dry-run: false
-          
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish to crates.io
+        run: cargo publish --token ${{ secrets.CARGO_TOKEN }}
