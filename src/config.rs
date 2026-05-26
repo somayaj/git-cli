@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 const DEFAULT_MODEL_FAST: &str = "qwen2.5:3b";
-const DEFAULT_MODEL_SMART: &str = "qwen2.5:3b";
+const DEFAULT_MODEL_SMART: &str = "mistral:7b-instruct-q4_0";
 const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
 const DEFAULT_KEEP_ALIVE: &str = "10m";
 
@@ -61,6 +61,11 @@ const COMPLEX_KEYWORDS: &[&str] = &[
     "conflict", "resolve", "hook", "migrate",
     "convert", "split", "reorganize", "restructure",
     "history", "rewrite history",
+    "how many", "how much", "who are", "who has", "which branches",
+    "pending", "review", "pull request", "pr ",
+    "compare", "between", "since", "contributors", "committers",
+    "analyze", "statistics", "stats", "summary",
+    "multiple branches", "all branches", "merge all",
 ];
 
 pub fn is_complex_task(task: &str) -> bool {

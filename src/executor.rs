@@ -85,8 +85,8 @@ fn fix_case_globs(cmd: &str) -> String {
 fn join_multiline_commands(lines: &[String]) -> Vec<String> {
     let mut merged: Vec<String> = Vec::new();
     let mut accumulator = String::new();
-    let mut open_single = false;
-    let mut open_double = false;
+    let mut in_single;
+    let mut in_double;
 
     for line in lines {
         if accumulator.is_empty() {
@@ -100,17 +100,17 @@ fn join_multiline_commands(lines: &[String]) -> Vec<String> {
             accumulator.push_str(line.trim());
         }
 
-        open_single = false;
-        open_double = false;
+        in_single = false;
+        in_double = false;
         for ch in accumulator.chars() {
             match ch {
-                '\'' if !open_double => open_single = !open_single,
-                '"' if !open_single => open_double = !open_double,
+                '\'' if !in_double => in_single = !in_single,
+                '"' if !in_single => in_double = !in_double,
                 _ => {}
             }
         }
 
-        if !open_single && !open_double {
+        if !in_single && !in_double {
             merged.push(accumulator.clone());
             accumulator.clear();
         }
