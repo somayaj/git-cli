@@ -1,0 +1,6 @@
+- name: Cargo Publish
+  uses: ryohidaka/action-cargo-publish@v0.1.0
+  with:
+      token: 
+      dry-run: false
+          
