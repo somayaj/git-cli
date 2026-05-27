@@ -24,36 +24,75 @@ const DESTRUCTIVE_PATTERNS: &[&str] = &[
     "branch -D ",
 ];
 
+pub struct QuoteAwareChars<'a> {
+    inner: std::str::CharIndices<'a>,
+    in_single: bool,
+    in_double: bool,
+}
+
+impl<'a> QuoteAwareChars<'a> {
+    pub fn new(s: &'a str) -> Self {
+        Self {
+            inner: s.char_indices(),
+            in_single: false,
+            in_double: false,
+        }
+    }
+}
+
+impl Iterator for QuoteAwareChars<'_> {
+    type Item = (usize, char, bool);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (i, ch) = self.inner.next()?;
+        match ch {
+            '\'' if !self.in_double => self.in_single = !self.in_single,
+            '"' if !self.in_single => self.in_double = !self.in_double,
+            _ => {}
+        }
+        let quoted = self.in_single || self.in_double;
+        Some((i, ch, quoted))
+    }
+}
+
+pub fn quotes_balanced(s: &str) -> bool {
+    let mut qac = QuoteAwareChars::new(s);
+    while qac.next().is_some() {}
+    !qac.in_single && !qac.in_double
+}
+
 pub fn parse_response(response: &str) -> ParsedOutput {
     let cleaned = sanitize_response(response);
 
     let lines = cleaned
         .lines()
         .filter(|l| !l.trim().is_empty())
-        .map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with('#') {
-                OutputLine::Comment(trimmed.to_string())
-            } else if trimmed.starts_with("git ") || trimmed.starts_with("gh ") {
-                let sanitized = strip_inline_comment(&strip_pipe_suffix(trimmed));
-                if has_placeholder(&sanitized) {
-                    OutputLine::Other(format!("[BLOCKED placeholder] {trimmed}"))
-                } else if is_cherry_pick_in_pr_context(&sanitized, &cleaned) {
-                    OutputLine::Other(format!("[BLOCKED cherry-pick] {trimmed} — use `gh pr create` with different --base instead"))
-                } else if is_checkout_for_cherry_pick(&sanitized, &cleaned) {
-                    OutputLine::Other(format!("[BLOCKED checkout] {trimmed} — not needed for PR workflow"))
-                } else if is_safe_command(&sanitized) {
-                    OutputLine::GitCommand(sanitized)
-                } else {
-                    OutputLine::Other(format!("[BLOCKED] {trimmed}"))
-                }
-            } else {
-                OutputLine::Other(trimmed.to_string())
-            }
-        })
+        .map(|line| classify_line(line, &cleaned))
         .collect();
 
     ParsedOutput { lines }
+}
+
+pub fn classify_line(line: &str, full_response: &str) -> OutputLine {
+    let trimmed = line.trim();
+    if trimmed.starts_with('#') {
+        OutputLine::Comment(trimmed.to_string())
+    } else if trimmed.starts_with("git ") || trimmed.starts_with("gh ") {
+        let sanitized = strip_inline_comment(&strip_pipe_suffix(trimmed));
+        if has_placeholder(&sanitized) {
+            OutputLine::Other(format!("[BLOCKED placeholder] {trimmed}"))
+        } else if is_cherry_pick_in_pr_context(&sanitized, full_response) {
+            OutputLine::Other(format!("[BLOCKED cherry-pick] {trimmed} — use `gh pr create` with different --base instead"))
+        } else if is_checkout_for_cherry_pick(&sanitized, full_response) {
+            OutputLine::Other(format!("[BLOCKED checkout] {trimmed} — not needed for PR workflow"))
+        } else if is_safe_command(&sanitized) {
+            OutputLine::GitCommand(sanitized)
+        } else {
+            OutputLine::Other(format!("[BLOCKED] {trimmed}"))
+        }
+    } else {
+        OutputLine::Other(trimmed.to_string())
+    }
 }
 
 pub fn sanitize_response(response: &str) -> String {
@@ -91,8 +130,6 @@ pub fn fix_case_globs(cmd: &str) -> String {
 pub fn join_multiline_commands(lines: &[String]) -> Vec<String> {
     let mut merged: Vec<String> = Vec::new();
     let mut accumulator = String::new();
-    let mut in_single;
-    let mut in_double;
 
     for line in lines {
         if accumulator.is_empty() {
@@ -106,17 +143,7 @@ pub fn join_multiline_commands(lines: &[String]) -> Vec<String> {
             accumulator.push_str(line.trim());
         }
 
-        in_single = false;
-        in_double = false;
-        for ch in accumulator.chars() {
-            match ch {
-                '\'' if !in_double => in_single = !in_single,
-                '"' if !in_single => in_double = !in_double,
-                _ => {}
-            }
-        }
-
-        if !in_single && !in_double {
+        if quotes_balanced(&accumulator) {
             merged.push(accumulator.clone());
             accumulator.clear();
         }
@@ -130,26 +157,19 @@ pub fn join_multiline_commands(lines: &[String]) -> Vec<String> {
 }
 
 pub fn strip_numbering(line: &str) -> Option<&str> {
-    let bytes = line.as_bytes();
-    let mut i = 0;
+    let digit_end = line
+        .char_indices()
+        .take_while(|(_, c)| c.is_ascii_digit())
+        .last()
+        .map(|(i, c)| i + c.len_utf8())?;
 
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        i += 1;
-    }
-    if i == 0 {
-        return None;
-    }
-
-    if i + 1 < bytes.len() && (bytes[i] == b'.' || bytes[i] == b')' || bytes[i] == b':') {
-        let rest = &line[i + 1..];
-        return Some(rest.trim_start());
+    let rest = &line[digit_end..];
+    if rest.starts_with('.') || rest.starts_with(')') || rest.starts_with(':') {
+        return Some(rest[1..].trim_start());
     }
 
-    let lower = line.to_lowercase();
-    if lower.starts_with("step ") {
-        if let Some(colon_pos) = line.find(':') {
-            return Some(line[colon_pos + 1..].trim_start());
-        }
+    if line.to_lowercase().starts_with("step ") {
+        return line.find(':').map(|pos| line[pos + 1..].trim_start());
     }
 
     None
@@ -180,22 +200,16 @@ pub fn strip_inline_comment(cmd: &str) -> String {
 }
 
 pub fn find_unquoted_hash(cmd: &str) -> Option<usize> {
-    let mut in_single = false;
-    let mut in_double = false;
-    let chars: Vec<char> = cmd.chars().collect();
-    for (i, &ch) in chars.iter().enumerate() {
-        match ch {
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            '#' if !in_single && !in_double && i > 0 => {
-                let next = chars.get(i + 1);
-                let prev = chars.get(i - 1);
-                if prev == Some(&' ') && !next.map_or(false, |c| c.is_ascii_digit()) {
-                    return Some(i);
-                }
+    let mut prev_char: Option<char> = None;
+
+    for (byte_idx, ch, quoted) in QuoteAwareChars::new(cmd) {
+        if !quoted && ch == '#' && prev_char == Some(' ') {
+            let next_char = cmd[byte_idx + ch.len_utf8()..].chars().next();
+            if !next_char.map_or(false, |c| c.is_ascii_digit()) {
+                return Some(byte_idx);
             }
-            _ => {}
         }
+        prev_char = Some(ch);
     }
     None
 }
@@ -224,17 +238,9 @@ pub fn strip_pipe_suffix(cmd: &str) -> String {
 }
 
 pub fn find_unquoted_pipe(cmd: &str) -> Option<usize> {
-    let mut in_single = false;
-    let mut in_double = false;
-    for (i, ch) in cmd.chars().enumerate() {
-        match ch {
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            '|' if !in_single && !in_double => return Some(i),
-            _ => {}
-        }
-    }
-    None
+    QuoteAwareChars::new(cmd)
+        .find(|&(_, ch, quoted)| ch == '|' && !quoted)
+        .map(|(i, _, _)| i)
 }
 
 pub fn is_safe_command(cmd: &str) -> bool {
@@ -326,25 +332,10 @@ pub fn is_safe_command(cmd: &str) -> bool {
 }
 
 pub fn strip_quoted_sections(cmd: &str) -> String {
-    let mut result = String::new();
-    let mut in_single = false;
-    let mut in_double = false;
-
-    for ch in cmd.chars() {
-        match ch {
-            '\'' if !in_double => {
-                in_single = !in_single;
-            }
-            '"' if !in_single => {
-                in_double = !in_double;
-            }
-            _ if !in_single && !in_double => {
-                result.push(ch);
-            }
-            _ => {}
-        }
-    }
-    result
+    QuoteAwareChars::new(cmd)
+        .filter(|&(_, ch, quoted)| !quoted && ch != '\'' && ch != '"')
+        .map(|(_, ch, _)| ch)
+        .collect()
 }
 
 pub fn extract_head_offset(cmd: &str) -> Option<u32> {
@@ -368,26 +359,19 @@ fn get_commit_count() -> u32 {
 pub fn shell_split(cmd: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
+    let mut qac = QuoteAwareChars::new(cmd);
 
-    for ch in cmd.chars() {
-        match ch {
-            '\'' if !in_double_quote => {
-                in_single_quote = !in_single_quote;
+    while let Some((_, ch, _)) = qac.next() {
+        let is_unquoted_space = ch == ' ' && !qac.in_single && !qac.in_double;
+        let is_delimiter = (ch == '\'' && !qac.in_double) || (ch == '"' && !qac.in_single);
+
+        if is_unquoted_space {
+            if !current.is_empty() {
+                parts.push(current.clone());
+                current.clear();
             }
-            '"' if !in_single_quote => {
-                in_double_quote = !in_double_quote;
-            }
-            ' ' if !in_single_quote && !in_double_quote => {
-                if !current.is_empty() {
-                    parts.push(current.clone());
-                    current.clear();
-                }
-            }
-            _ => {
-                current.push(ch);
-            }
+        } else if !is_delimiter {
+            current.push(ch);
         }
     }
     if !current.is_empty() {
