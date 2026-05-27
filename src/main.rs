@@ -77,10 +77,7 @@ async fn main() {
     }
 
     let lower = resolved_task.to_lowercase();
-    let needs_gh = lower.contains("pr")
-        || lower.contains("pull request")
-        || lower.contains("merge request");
-    if needs_gh && !doctor::gh_on_path() {
+    if config::is_pr_task(&lower) && !doctor::gh_on_path() {
         eprintln!(
             "{} This task may need GitHub CLI. Install: {}",
             "Warning:".yellow().bold(),
@@ -96,7 +93,14 @@ async fn main() {
     };
 
     let system_prompt = prompt::build_system_prompt();
-    let user_prompt = prompt::build_user_prompt(&resolved_task, &git_context);
+    let mut user_prompt = prompt::build_user_prompt(&resolved_task, &git_context);
+    if config::is_pr_task(&resolved_task) {
+        if let Some(ref branch) = git_context.branch {
+            user_prompt.push_str(&format!(
+                "\n\nFor this PR task, use `{branch}` as the head branch (from repository state above)."
+            ));
+        }
+    }
 
     if cli.verbose {
         eprintln!("\n{}\n{}\n\n{}\n{}\n",

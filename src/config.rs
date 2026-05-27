@@ -69,9 +69,30 @@ const COMPLEX_KEYWORDS: &[&str] = &[
     "multiple branches", "all branches", "merge all",
 ];
 
+const PR_KEYWORDS: &[&str] = &[
+    "pull request",
+    "create a pr",
+    "create pr",
+    "open a pr",
+    "open pr",
+    "new pr",
+    "merge pr",
+    "list pr",
+    "show pr",
+    " pr ",
+    " pr to",
+    " pr from",
+    " pr for",
+];
+
+pub fn is_pr_task(task: &str) -> bool {
+    let lower = task.to_lowercase();
+    PR_KEYWORDS.iter().any(|k| lower.contains(k)) || lower.ends_with(" pr")
+}
+
 pub fn is_complex_task(task: &str) -> bool {
     let lower = task.to_lowercase();
-    COMPLEX_KEYWORDS.iter().any(|k| lower.contains(k))
+    is_pr_task(&lower) || COMPLEX_KEYWORDS.iter().any(|k| lower.contains(k))
 }
 
 impl Config {

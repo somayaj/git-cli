@@ -461,7 +461,7 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
     let mut branch_pushed = false;
 
     for cmd_str in commands {
-        let actual_cmd = if cmd_str.starts_with("gh pr merge") {
+        let mut actual_cmd = if cmd_str.starts_with("gh pr merge") {
             if let Some(n) = extract_pr_merge_number(cmd_str) {
                 if let Some(&actual) = pr_number_map.get(&n) {
                     let replaced = cmd_str.replacen(&n.to_string(), &actual.to_string(), 1);
@@ -491,6 +491,10 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
         } else {
             cmd_str.to_string()
         };
+
+        if actual_cmd.starts_with("gh pr create") {
+            actual_cmd = fix_gh_pr_create_head(&actual_cmd);
+        }
 
         if actual_cmd.starts_with("gh pr create") && !branch_pushed {
             if let Some(branch) = extract_head_branch(&actual_cmd) {
@@ -859,6 +863,47 @@ pub fn extract_head_branch(cmd: &str) -> Option<String> {
         }
     }
     None
+}
+
+pub fn fix_gh_pr_create_head(cmd: &str) -> String {
+    let Some(head) = extract_head_branch(cmd) else {
+        return cmd.to_string();
+    };
+    if branch_exists(&head) {
+        return cmd.to_string();
+    }
+    let Some(current) = current_branch() else {
+        return cmd.to_string();
+    };
+    eprintln!(
+        "  {} Replacing hallucinated --head `{}` with current branch `{}`",
+        "Auto:".cyan().bold(),
+        head,
+        current
+    );
+    cmd.replacen(
+        &format!("--head {head}"),
+        &format!("--head {current}"),
+        1,
+    )
+}
+
+fn branch_exists(name: &str) -> bool {
+    Command::new("git")
+        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{name}")])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn current_branch() -> Option<String> {
+    Command::new("git")
+        .args(["branch", "--show-current"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 pub fn extract_pr_merge_number(cmd: &str) -> Option<u32> {

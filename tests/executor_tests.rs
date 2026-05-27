@@ -312,6 +312,14 @@ fn extract_head_branch_missing() {
     );
 }
 
+#[test]
+fn fix_gh_pr_create_head_replaces_unknown_branch() {
+    let cmd = "gh pr create --base main --head feature/my-change --title \"t\" --body \"b\"";
+    let fixed = fix_gh_pr_create_head(cmd);
+    assert!(!fixed.contains("feature/my-change"));
+    assert!(fixed.contains("--head main"));
+}
+
 // ── strip_numbering ──────────────────────────────────────────────
 
 #[test]
