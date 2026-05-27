@@ -1,10 +1,7 @@
+use crate::config::PromptConfig;
 use crate::context::GitContext;
 
-pub fn build_system_prompt() -> String {
-    let os_info = get_os_info();
-
-    format!(
-        r#"You are a Git command-line expert. Given a task, output ONLY the exact git/gh commands needed.
+const DEFAULT_PREAMBLE: &str = r#"You are a Git command-line expert. Given a task, output ONLY the exact git/gh commands needed.
 
 Rules:
 - Output only valid `git` or `gh` commands, one per line.
@@ -18,11 +15,13 @@ Rules:
 - For filter-branch --msg-filter, use single-line sed or case/esac. NEVER use multi-line if/then/fi.
 - When rewriting specific commits with case/esac, ALWAYS append * after each hash pattern (e.g. abc123*) because $GIT_COMMIT contains the full 40-char hash.
 - When force pushing, use `git push --force origin <branch>`, NOT `--force-with-lease` (it fails after filter-branch rewrites).
-- NEVER use `git rebase -i` — this tool runs non-interactively with no editor. For squashing use `git reset --soft` + `git commit`. For rewording use `git filter-branch` or `git commit --amend -m`.
 - NEVER use placeholder values like abc123, def456, PR-NUMBER, etc. ONLY use real commit hashes, branch names, and PR numbers from the repository state provided.
 - NEVER use shell pipes (|), subshells ($(...)), chained commands (&&, ;), for loops, xargs, or shell variables ($branch). List each command individually using real branch names from the repository state.
 - Use git's built-in flags instead of piping (e.g. `git rev-list --count` instead of `git log | wc -l`).
-- The repository state below includes all branches and open PRs — use this information.
+- The repository state below includes all branches and open PRs — use this information."#;
+
+const SAFETY_RULES: &str = r#"
+- NEVER use `git rebase -i` — this tool runs non-interactively with no editor. For squashing use `git reset --soft` + `git commit`. For rewording use `git filter-branch` or `git commit --amend -m`.
 - When deleting a branch, first `git checkout main` (to switch off it), then delete BOTH local (`git branch -D`) AND remote (`git push origin --delete`).
 - If the task asks to BOTH create AND delete a branch (with push), the full sequence is: `git checkout -b <branch>` → `git push origin <branch>` → `git checkout main` → `git branch -D <branch>` → `git push origin --delete <branch>`. You MUST push the branch to remote BEFORE deleting it.
 - Use `git checkout -b` only for NEW branches. If the branch already exists in the branch list, use `git checkout` (without -b).
@@ -38,12 +37,9 @@ PR Rules (CRITICAL — follow exactly):
 - Check the Open PRs list in repo state (format: #NUMBER head → base "title"). If a PR already exists with the SAME head branch AND a matching target base, do NOT create a duplicate — just merge the existing one using `gh pr merge <number> --merge`.
 - ONLY merge PRs that belong to the CURRENT head branch. NEVER merge PRs from other feature branches. For example, if you are on feature/add-echo-endpoint, only merge PRs where head is feature/add-echo-endpoint. Ignore PRs from other branches like feature/add-uptime-endpoint.
 - When the task says "merge them all", merge ALL PRs for the current branch — both existing ones and newly created ones.
-- After merging PRs, do NOT add any extra `git push` commands. Merging via `gh pr merge` handles everything on the remote. STOP after the last `gh pr merge`.
+- After merging PRs, do NOT add any extra `git push` commands. Merging via `gh pr merge` handles everything on the remote. STOP after the last `gh pr merge`."#;
 
-OS: {os_info}
-
-Examples:
-
+const BUILT_IN_EXAMPLES: &str = r#"
 Task: undo my last commit but keep changes
 # Undo the last commit, keeping changes staged
 git reset --soft HEAD~1
@@ -142,7 +138,21 @@ gh pr create --base v15 --head feature/my-change --title "feat: my change" --bod
 gh pr merge 12 --merge
 gh pr merge 13 --merge
 gh pr merge 11 --merge --delete-branch
-# DONE — no more commands needed. Do NOT add git push after merging PRs."#
+# DONE — no more commands needed. Do NOT add git push after merging PRs."#;
+
+pub fn build_system_prompt() -> String {
+    let os_info = get_os_info();
+    let config = PromptConfig::load();
+
+    let preamble = config.preamble.as_deref().unwrap_or(DEFAULT_PREAMBLE);
+
+    let mut custom_examples = String::new();
+    for ex in &config.examples {
+        custom_examples.push_str(&format!("\nTask: {}\n{}\n", ex.task, ex.commands));
+    }
+
+    format!(
+        "{preamble}\n{SAFETY_RULES}\n\nOS: {os_info}\n\nExamples:\n{BUILT_IN_EXAMPLES}{custom_examples}"
     )
 }
 
