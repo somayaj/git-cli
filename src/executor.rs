@@ -424,6 +424,13 @@ pub fn execute_commands(parsed: &ParsedOutput, force: bool) -> Result<(), String
         return Ok(());
     }
 
+    if commands.iter().any(|c| c.starts_with("gh ")) && !crate::doctor::gh_on_path() {
+        return Err(
+            "GitHub CLI (gh) not found on PATH. Install: https://cli.github.com — then run `gh auth login`"
+                .to_string(),
+        );
+    }
+
     if !force && has_destructive_commands(parsed) {
         eprintln!(
             "  {} Contains destructive commands. Use {} to override.",

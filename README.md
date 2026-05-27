@@ -13,11 +13,20 @@ Works in any terminal — IntelliJ, Cursor, VS Code, and others.
 
 ## Prerequisites
 
+- [Git](https://git-scm.com) on your PATH
 - [Ollama](https://ollama.com) running locally with models pulled
+- [GitHub CLI](https://cli.github.com) (`gh`) — required for PR create/merge tasks
 
 ```bash
+# macOS
+brew install gh
+gh auth login
+
 # Pull the default models
 ollama pull qwen2.5:3b
+
+# Verify everything is set up
+git-cli doctor
 ```
 
 ## Installation
@@ -77,7 +86,13 @@ The output shows which model was selected:
 
 ## GitHub CLI Support
 
-git-cli can also generate `gh` commands for GitHub operations:
+git-cli generates `gh` commands for GitHub operations. You need the [GitHub CLI](https://cli.github.com) installed and authenticated:
+
+```bash
+brew install gh      # macOS
+gh auth login
+git-cli doctor       # verify git, gh, and Ollama are ready
+```
 
 ```bash
 git-cli "create a PR from this branch to main" --execute

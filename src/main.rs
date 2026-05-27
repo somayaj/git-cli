@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod context;
+mod doctor;
 mod executor;
 mod ollama;
 mod prompt;
@@ -35,6 +36,13 @@ async fn main() {
             handle_init_config();
             return;
         }
+        Some(Commands::Doctor) => {
+            let config = Config::load();
+            if !doctor::run(&config.endpoint).await {
+                std::process::exit(1);
+            }
+            return;
+        }
         None => {}
     }
 
@@ -61,6 +69,22 @@ async fn main() {
         eprintln!(
             "{} Not inside a git repository. Commands will be generated without repo context.",
             "Warning:".yellow().bold()
+        );
+    }
+
+    if let Some(ref warning) = git_context.gh_warning {
+        eprintln!("{} {warning}", "Warning:".yellow().bold());
+    }
+
+    let lower = resolved_task.to_lowercase();
+    let needs_gh = lower.contains("pr")
+        || lower.contains("pull request")
+        || lower.contains("merge request");
+    if needs_gh && !doctor::gh_on_path() {
+        eprintln!(
+            "{} This task may need GitHub CLI. Install: {}",
+            "Warning:".yellow().bold(),
+            "brew install gh && gh auth login".dimmed()
         );
     }
 

@@ -9,6 +9,7 @@ pub struct GitContext {
     pub remotes: Option<String>,
     pub branches: Option<String>,
     pub open_prs: Option<String>,
+    pub gh_warning: Option<String>,
 }
 
 impl GitContext {
@@ -26,6 +27,7 @@ impl GitContext {
                 remotes: None,
                 branches: None,
                 open_prs: None,
+                gh_warning: None,
             };
         }
 
@@ -33,7 +35,27 @@ impl GitContext {
             .map(|s| s.trim().to_string())
             .ok();
 
-        let all_prs = run_cmd("gh", &["pr", "list", "--state", "open", "--limit", "20", "--json", "number,title,headRefName,baseRefName", "--template", "{{range .}}#{{.number}} {{.headRefName}} → {{.baseRefName}} \"{{.title}}\"\n{{end}}"]).ok();
+        let gh_warning = crate::doctor::gh_pr_list_error();
+        let all_prs = if gh_warning.is_some() {
+            None
+        } else {
+            run_cmd(
+                "gh",
+                &[
+                    "pr",
+                    "list",
+                    "--state",
+                    "open",
+                    "--limit",
+                    "20",
+                    "--json",
+                    "number,title,headRefName,baseRefName",
+                    "--template",
+                    "{{range .}}#{{.number}} {{.headRefName}} → {{.baseRefName}} \"{{.title}}\"\n{{end}}",
+                ],
+            )
+            .ok()
+        };
 
         let open_prs = match (&branch, &all_prs) {
             (Some(current_branch), Some(prs)) => {
@@ -70,6 +92,7 @@ impl GitContext {
             remotes: run_git(&["remote", "-v"]).ok(),
             branches: run_git(&["branch", "-a", "--no-color"]).ok(),
             open_prs,
+            gh_warning,
         }
     }
 

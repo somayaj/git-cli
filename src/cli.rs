@@ -56,4 +56,7 @@ pub enum Commands {
 
     /// Create a starter prompt config at ~/.config/git-cli/prompt.toml
     InitConfig,
+
+    /// Check that git, gh, and Ollama are installed and reachable
+    Doctor,
 }
