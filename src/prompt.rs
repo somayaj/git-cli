@@ -37,7 +37,8 @@ PR Rules (CRITICAL — follow exactly):
 - Check the Open PRs list in repo state (format: #NUMBER head → base "title"). If a PR already exists with the SAME head branch AND a matching target base, do NOT create a duplicate — just merge the existing one using `gh pr merge <number> --merge`.
 - ONLY merge PRs that belong to the CURRENT head branch. NEVER merge PRs from other feature branches. For example, if you are on feature/add-echo-endpoint, only merge PRs where head is feature/add-echo-endpoint. Ignore PRs from other branches like feature/add-uptime-endpoint.
 - When the task says "merge them all", merge ALL PRs for the current branch — both existing ones and newly created ones.
-- After merging PRs, do NOT add any extra `git push` commands. Merging via `gh pr merge` handles everything on the remote. STOP after the last `gh pr merge`."#;
+- After merging PRs, do NOT add any extra `git push` commands. Merging via `gh pr merge` handles everything on the remote. STOP after the last `gh pr merge`.
+- For simple "create a PR" tasks, use ONLY the current branch and real base branches from repository state. Do NOT copy branch names or PR numbers from the examples."#;
 
 const BUILT_IN_EXAMPLES: &str = r#"
 Task: undo my last commit but keep changes
@@ -125,6 +126,13 @@ git branch -D feature/login
 # Delete remote feature branches
 git push origin --delete feature/auth
 git push origin --delete feature/login
+
+Task: create a PR to main
+(Current branch: feature/login)
+# Push the current branch to remote
+git push origin feature/login
+# Create pull request targeting main
+gh pr create --base main --head feature/login --title "feat: login" --body "Description"
 
 Task: create PRs from feature/my-change to v15.3, v15, and main and merge them
 (Open PRs show: #11 feature/my-change → main "feat: my change")
