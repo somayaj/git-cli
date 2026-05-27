@@ -53,4 +53,7 @@ pub enum Commands {
         #[arg(value_name = "SHELL")]
         shell: clap_complete::Shell,
     },
+
+    /// Create a starter prompt config at ~/.config/git-cli/prompt.toml
+    InitConfig,
 }

@@ -123,6 +123,46 @@ pub = "push and set upstream"
 
 CLI flags (`--model`, `--endpoint`) override the config file. `--model` overrides both fast and smart for that invocation.
 
+### Prompt Customization
+
+You can customize the system prompt sent to the LLM via `~/.config/git-cli/prompt.toml`. Scaffold a starter file:
+
+```bash
+git-cli init-config
+```
+
+The prompt is built in three layers:
+
+| Layer | Location | Overridable? |
+|-------|----------|-------------|
+| **Preamble** | `prompt.toml` → `preamble` | Yes — replace the default role/rules text |
+| **Safety rules** | Embedded in binary | No — always appended (PR rules, `rebase -i` blocking, branch lifecycle) |
+| **Examples** | `prompt.toml` → `[[examples]]` | Additive — your examples are appended after the built-in ones |
+
+Example `~/.config/git-cli/prompt.toml`:
+
+```toml
+# Replace the default preamble (optional)
+# preamble = "You are a senior DevOps engineer..."
+
+# Add custom few-shot examples
+[[examples]]
+task = "tag the current commit as v1.0.0"
+commands = """
+# Create an annotated tag
+git tag -a v1.0.0 -m "Release v1.0.0"
+# Push the tag to remote
+git push origin v1.0.0"""
+
+[[examples]]
+task = "show the diff between main and develop"
+commands = """
+# Compare main and develop branches
+git diff main..develop"""
+```
+
+If the file doesn't exist, the built-in defaults are used — no configuration required.
+
 ### Aliases
 
 Define shortcuts in `~/.git-cli.toml` to save typing:

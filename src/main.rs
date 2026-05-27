@@ -10,7 +10,7 @@ use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use cli::{Cli, Commands};
 use colored::Colorize;
-use config::Config;
+use config::{Config, PromptConfig};
 use context::GitContext;
 
 #[tokio::main]
@@ -29,6 +29,10 @@ async fn main() {
         Some(Commands::Completions { shell }) => {
             let mut cmd = Cli::command();
             generate(shell, &mut cmd, "git-cli", &mut std::io::stdout());
+            return;
+        }
+        Some(Commands::InitConfig) => {
+            handle_init_config();
             return;
         }
         None => {}
@@ -182,4 +186,76 @@ fn print_examples() {
     println!("  {} to execute commands after review", "--execute / -x".bold());
     println!("  {} to allow destructive commands", "--force".bold());
     println!("  {} to override model selection", "--model / -m".bold());
+}
+
+fn handle_init_config() {
+    let Some(dir) = PromptConfig::config_dir() else {
+        eprintln!("{} Could not determine home directory.", "Error:".red().bold());
+        std::process::exit(1);
+    };
+    let path = dir.join("prompt.toml");
+
+    if path.exists() {
+        eprintln!(
+            "{} {} already exists. Edit it directly or delete it to re-scaffold.",
+            "Skipped:".yellow().bold(),
+            path.display()
+        );
+        return;
+    }
+
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("{} Failed to create {}: {e}", "Error:".red().bold(), dir.display());
+        std::process::exit(1);
+    }
+
+    let starter = r#"# git-cli prompt configuration
+# This file lets you customize the system prompt sent to the LLM.
+# Location: ~/.config/git-cli/prompt.toml
+
+# ─── Preamble ───────────────────────────────────────────────
+# Override the default role/rules preamble. Safety rules (rebase -i
+# blocking, PR rules, branch lifecycle) are always appended and
+# cannot be overridden.
+#
+# Uncomment and edit to replace the default preamble:
+# preamble = """
+# You are a Git command-line expert. Given a task, output ONLY the exact
+# git/gh commands needed.
+# """
+
+# ─── Custom Examples ────────────────────────────────────────
+# Add your own few-shot examples. These are appended AFTER the
+# built-in examples, giving the LLM extra patterns to learn from.
+#
+# Each [[examples]] entry needs a `task` and `commands` field:
+
+# [[examples]]
+# task = "tag the current commit as v1.0.0"
+# commands = """
+# # Create an annotated tag
+# git tag -a v1.0.0 -m "Release v1.0.0"
+# # Push the tag to remote
+# git push origin v1.0.0"""
+
+# [[examples]]
+# task = "show the diff between main and develop"
+# commands = """
+# # Compare main and develop branches
+# git diff main..develop"""
+"#;
+
+    match std::fs::write(&path, starter) {
+        Ok(()) => {
+            println!("{} Created {}", "✓".green().bold(), path.display());
+            println!(
+                "  {} Edit this file to customize the LLM prompt.",
+                "Hint:".dimmed()
+            );
+        }
+        Err(e) => {
+            eprintln!("{} Failed to write {}: {e}", "Error:".red().bold(), path.display());
+            std::process::exit(1);
+        }
+    }
 }

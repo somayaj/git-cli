@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use dirs;
 
 const DEFAULT_MODEL_FAST: &str = "qwen2.5:3b";
 const DEFAULT_MODEL_SMART: &str = "qwen2.5:3b";
@@ -122,5 +123,49 @@ impl Config {
             .get(input)
             .cloned()
             .unwrap_or_else(|| input.to_string())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PromptExample {
+    pub task: String,
+    pub commands: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PromptConfig {
+    #[serde(default)]
+    pub preamble: Option<String>,
+    #[serde(default)]
+    pub examples: Vec<PromptExample>,
+}
+
+impl Default for PromptConfig {
+    fn default() -> Self {
+        Self {
+            preamble: None,
+            examples: Vec::new(),
+        }
+    }
+}
+
+impl PromptConfig {
+    pub fn config_dir() -> Option<PathBuf> {
+        dirs::home_dir().map(|h| h.join(".config").join("git-cli"))
+    }
+
+    pub fn config_path() -> Option<PathBuf> {
+        Self::config_dir().map(|d| d.join("prompt.toml"))
+    }
+
+    pub fn load() -> Self {
+        let Some(path) = Self::config_path() else {
+            return Self::default();
+        };
+
+        match fs::read_to_string(&path) {
+            Ok(contents) => toml::from_str(&contents).unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
     }
 }

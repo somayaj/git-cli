@@ -15,7 +15,7 @@ impl GitContext {
     pub fn gather() -> Self {
         let is_repo = run_git(&["rev-parse", "--is-inside-work-tree"])
             .map(|s| s.trim() == "true")
-            .unwrap_or(false);
+            .unwrap_or(false);  // tolerate missing git
 
         if !is_repo {
             return Self {
@@ -29,23 +29,21 @@ impl GitContext {
             };
         }
 
-        let branch = run_git(&["rev-parse", "--abbrev-ref", "HEAD"]).map(|s| s.trim().to_string());
+        let branch = run_git(&["rev-parse", "--abbrev-ref", "HEAD"])
+            .map(|s| s.trim().to_string())
+            .ok();
 
-        let all_prs = run_cmd("gh", &["pr", "list", "--state", "open", "--limit", "20", "--json", "number,title,headRefName,baseRefName", "--template", "{{range .}}#{{.number}} {{.headRefName}} → {{.baseRefName}} \"{{.title}}\"\n{{end}}"]);
+        let all_prs = run_cmd("gh", &["pr", "list", "--state", "open", "--limit", "20", "--json", "number,title,headRefName,baseRefName", "--template", "{{range .}}#{{.number}} {{.headRefName}} → {{.baseRefName}} \"{{.title}}\"\n{{end}}"]).ok();
 
         let open_prs = match (&branch, &all_prs) {
             (Some(current_branch), Some(prs)) => {
-                let mut mine = Vec::new();
-                let mut others = Vec::new();
-                for line in prs.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() { continue; }
-                    if trimmed.contains(&format!(" {} → ", current_branch)) {
-                        mine.push(trimmed.to_string());
-                    } else {
-                        others.push(trimmed.to_string());
-                    }
-                }
+                let pattern = format!(" {} → ", current_branch);
+                let (mine, others): (Vec<String>, Vec<String>) = prs
+                    .lines()
+                    .map(|l| l.trim())
+                    .filter(|l| !l.is_empty())
+                    .map(|l| l.to_string())
+                    .partition(|l| l.contains(&pattern));
                 let mut result = String::new();
                 if !mine.is_empty() {
                     result.push_str(&format!("PRs for current branch ({}):\n", current_branch));
@@ -67,10 +65,10 @@ impl GitContext {
         Self {
             is_repo: true,
             branch,
-            status: run_git(&["status", "--porcelain"]),
-            recent_log: run_git(&["log", "--oneline", "-10"]),
-            remotes: run_git(&["remote", "-v"]),
-            branches: run_git(&["branch", "-a", "--no-color"]),
+            status: run_git(&["status", "--porcelain"]).ok(),
+            recent_log: run_git(&["log", "--oneline", "-10"]).ok(),
+            remotes: run_git(&["remote", "-v"]).ok(),
+            branches: run_git(&["branch", "-a", "--no-color"]).ok(),
             open_prs,
         }
     }
@@ -122,20 +120,28 @@ impl GitContext {
     }
 }
 
-fn run_git(args: &[&str]) -> Option<String> {
-    Command::new("git")
+fn run_git(args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
         .args(args)
         .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .map_err(|e| format!("Failed to run git: {e}"))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
 }
 
-fn run_cmd(cmd: &str, args: &[&str]) -> Option<String> {
-    Command::new(cmd)
+fn run_cmd(cmd: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new(cmd)
         .args(args)
         .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .map_err(|e| format!("Failed to run {cmd}: {e}"))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
 }
