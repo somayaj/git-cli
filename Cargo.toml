@@ -1,6 +1,6 @@
 [package]
 name = "git-cli"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 description = "A CLI tool that translates natural-language task descriptions into git commands using a local Ollama LLM"
 license = "MIT"
