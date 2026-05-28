@@ -4,6 +4,7 @@ mod context;
 mod doctor;
 mod executor;
 mod ollama;
+mod pr_shortcut;
 mod prompt;
 
 
@@ -79,10 +80,36 @@ async fn main() {
     let lower = resolved_task.to_lowercase();
     if config::is_pr_task(&lower) && !doctor::gh_on_path() {
         eprintln!(
-            "{} This task may need GitHub CLI. Install: {}",
-            "Warning:".yellow().bold(),
+            "{} This task needs GitHub CLI. Install: {}",
+            "Error:".red().bold(),
             "brew install gh && gh auth login".dimmed()
         );
+        std::process::exit(1);
+    }
+
+    // Deterministic shortcut for simple "create a PR" — no LLM, works out of the box
+    if let Some(shortcut_result) = pr_shortcut::try_simple_pr_create(&resolved_task, &git_context) {
+        match shortcut_result {
+            Ok(response) => {
+                eprintln!(
+                    "{} Built-in PR shortcut (no LLM)\n",
+                    "●".cyan()
+                );
+                let parsed = executor::parse_response(&response);
+                executor::display(&parsed);
+                if cli.execute {
+                    if let Err(e) = executor::execute_commands(&parsed, cli.force) {
+                        eprintln!("{} {e}", "Error:".red().bold());
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
+            Err(e) => {
+                eprintln!("{} {e}", "Error:".red().bold());
+                std::process::exit(1);
+            }
+        }
     }
 
     let selected_model = config.select_model(&resolved_task);

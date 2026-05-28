@@ -4,4 +4,5 @@ pub mod context;
 pub mod doctor;
 pub mod executor;
 pub mod ollama;
+pub mod pr_shortcut;
 pub mod prompt;

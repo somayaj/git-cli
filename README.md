@@ -7,7 +7,7 @@ Works in any terminal — IntelliJ, Cursor, VS Code, and others.
 ## Features
 
 - **Dual model routing** — simple tasks use a fast small model, complex tasks auto-switch to a smarter model
-- **GitHub CLI support** — generates `gh` commands for PRs, merges, and repo operations
+- **GitHub CLI support** — built-in shortcut for `create a pr` runs `gh pr create` directly; complex PR workflows use the LLM
 - **Safety checks** — destructive commands are blocked unless `--force` is passed; shell injection is always blocked
 - **Smart parsing** — handles multi-line LLM output, strips markdown, auto-fixes case/esac glob patterns
 
@@ -86,7 +86,19 @@ The output shows which model was selected:
 
 ## GitHub CLI Support
 
-git-cli generates `gh` commands for GitHub operations. You need the [GitHub CLI](https://cli.github.com) installed and authenticated:
+git-cli uses **`gh` directly** for simple PR creation — no LLM guessing.
+
+```bash
+# On a feature branch (not main):
+git checkout -b feature/my-change
+git-cli "create a pr" --execute          # built-in shortcut → git push + gh pr create
+git-cli "create a pr to develop" --execute
+
+# Complex multi-target PR workflows still use the LLM
+git-cli "create PRs to v15 and main and merge them" --execute
+```
+
+You need the [GitHub CLI](https://cli.github.com) installed and authenticated:
 
 ```bash
 brew install gh      # macOS
@@ -94,10 +106,12 @@ gh auth login
 git-cli doctor       # verify git, gh, and Ollama are ready
 ```
 
+**Why you must be on a feature branch:** GitHub cannot open a PR from `main` to `main`. If you are on `main`, create a branch first:
+
 ```bash
-git-cli "create a PR from this branch to main" --execute
-git-cli "merge PR #3 and delete the branch" --execute
-git-cli "list open pull requests" --execute
+git checkout -b feature/my-change
+git push origin feature/my-change
+git-cli "create a pr" --execute
 ```
 
 ## Safety
