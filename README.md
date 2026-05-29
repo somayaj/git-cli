@@ -231,6 +231,23 @@ git-cli completions fish > ~/.config/fish/completions/git-cli.fish
 8. Displays commands with syntax highlighting.
 9. With `--execute`, runs each command sequentially.
 
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide, including:
+
+- Local setup, testing, and project layout
+- Branch naming (`feat/`, `fix/`, `docs/`, etc.) and conventional commit messages
+- Pull request requirements and review process
+- Merge policy (squash merge to `main`, releases via version tags)
+
+Quick start for contributors:
+
+```bash
+git clone https://github.com/somayaj/git-cli.git
+cd git-cli
+cargo test
+```
+
 ## License
 
 MIT
