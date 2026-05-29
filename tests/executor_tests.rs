@@ -1,4 +1,9 @@
+use git_cli::command::{GitAction, PlannedAction};
 use git_cli::executor::*;
+
+fn is_runnable_command(line: &OutputLine) -> bool {
+    matches!(line, OutputLine::Command(_) | OutputLine::GitCommand(_))
+}
 
 // ── shell_split ──────────────────────────────────────────────────
 
@@ -139,10 +144,15 @@ fn safe_command_basic_git() {
 }
 
 #[test]
-fn safe_command_gh_allowed() {
+fn safe_command_gh_pr_create_allowed() {
     assert!(is_safe_command(
         "gh pr create --base main --head feature/x --title \"t\" --body \"b\""
     ));
+}
+
+#[test]
+fn safe_command_gh_auth_blocked() {
+    assert!(!is_safe_command("gh auth login"));
 }
 
 #[test]
@@ -442,7 +452,7 @@ fn parse_response_separates_comments_and_commands() {
     let commands: Vec<_> = parsed
         .lines
         .iter()
-        .filter(|l| matches!(l, OutputLine::GitCommand(_)))
+        .filter(|l| is_runnable_command(l))
         .collect();
     assert_eq!(comments.len(), 2);
     assert_eq!(commands.len(), 2);
@@ -454,7 +464,7 @@ fn parse_response_strips_code_fences() {
     let commands: Vec<_> = parsed
         .lines
         .iter()
-        .filter(|l| matches!(l, OutputLine::GitCommand(_)))
+        .filter(|l| is_runnable_command(l))
         .collect();
     assert_eq!(commands.len(), 1);
 }
@@ -465,7 +475,7 @@ fn parse_response_strips_numbering() {
     let commands: Vec<_> = parsed
         .lines
         .iter()
-        .filter(|l| matches!(l, OutputLine::GitCommand(_)))
+        .filter(|l| is_runnable_command(l))
         .collect();
     assert_eq!(commands.len(), 2);
 }
@@ -490,6 +500,15 @@ fn parse_response_blocks_injection() {
         .filter(|l| matches!(l, OutputLine::Other(_)))
         .collect();
     assert_eq!(blocked.len(), 1);
+}
+
+#[test]
+fn parse_response_typed_git_status() {
+    let parsed = parse_response("git status");
+    assert!(matches!(
+        parsed.lines.first(),
+        Some(OutputLine::Command(c)) if matches!(c.action, PlannedAction::Git(GitAction::Status))
+    ));
 }
 
 // ── join_multiline_commands ──────────────────────────────────────

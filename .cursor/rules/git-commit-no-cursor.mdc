@@ -1,0 +1,16 @@
+---
+description: Never add Cursor co-author or attribution trailers to git commits
+alwaysApply: true
+---
+
+# Git Commits — No Cursor Attribution
+
+Never add commit message trailers or footers such as:
+
+- `Co-authored-by: Cursor <cursoragent@cursor.com>`
+- `Made-with: Cursor` / `Made with Cursor`
+- Any similar tool or vendor attribution
+
+This applies to all commits, amend operations, and commit messages suggested to the user.
+
+When committing via git, use only the commit subject and body the user requested — nothing else in the message.
