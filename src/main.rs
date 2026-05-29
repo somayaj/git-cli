@@ -1,4 +1,5 @@
 mod cli;
+mod command;
 mod config;
 mod context;
 mod doctor;
