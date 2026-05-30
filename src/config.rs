@@ -9,6 +9,15 @@ const DEFAULT_MODEL_SMART: &str = "qwen2.5:3b";
 const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
 const DEFAULT_KEEP_ALIVE: &str = "10m";
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Backend {
+    #[default]
+    Auto,
+    Ollama,
+    Openai,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     #[serde(default = "default_model_fast")]
@@ -21,6 +30,8 @@ pub struct Config {
     pub endpoint: String,
     #[serde(default = "default_keep_alive")]
     pub keep_alive: String,
+    #[serde(default)]
+    pub backend: Backend,
     #[serde(default)]
     pub aliases: HashMap<String, String>,
 }
@@ -49,7 +60,18 @@ impl Default for Config {
             model: None,
             endpoint: default_endpoint(),
             keep_alive: default_keep_alive(),
+            backend: Backend::default(),
             aliases: HashMap::new(),
+        }
+    }
+}
+
+impl Backend {
+    pub fn label(self) -> &'static str {
+        match self {
+            Backend::Auto => "auto",
+            Backend::Ollama => "ollama",
+            Backend::Openai => "openai",
         }
     }
 }

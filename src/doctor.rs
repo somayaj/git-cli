@@ -1,6 +1,9 @@
 use colored::Colorize;
 use std::process::Command;
 
+use crate::config::Backend;
+use crate::llm;
+
 pub struct Check {
     pub name: &'static str,
     pub ok: bool,
@@ -72,41 +75,21 @@ pub fn check_gh() -> Check {
     }
 }
 
-pub async fn check_ollama(endpoint: &str) -> Check {
-    let url = format!("{endpoint}/api/tags");
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return Check {
-                name: "ollama",
-                ok: false,
-                detail: e.to_string(),
-                hint: Some("Start Ollama: ollama serve"),
-            };
-        }
-    };
-
-    match client.get(&url).send().await {
-        Ok(resp) if resp.status().is_success() => Check {
-            name: "ollama",
+pub async fn check_llm(endpoint: &str, backend: Backend) -> Check {
+    match llm::detect(endpoint, backend).await {
+        Ok(status) => Check {
+            name: "llm",
             ok: true,
-            detail: format!("reachable at {endpoint}"),
+            detail: status.detail,
             hint: None,
         },
-        Ok(resp) => Check {
-            name: "ollama",
+        Err(detail) => Check {
+            name: "llm",
             ok: false,
-            detail: format!("returned HTTP {}", resp.status()),
-            hint: Some("Start Ollama: ollama serve"),
-        },
-        Err(e) => Check {
-            name: "ollama",
-            ok: false,
-            detail: format!("not reachable at {endpoint}: {e}"),
-            hint: Some("Start Ollama: ollama serve"),
+            detail,
+            hint: Some(
+                "Start Ollama (`ollama serve`) or llama-server on the configured endpoint",
+            ),
         },
     }
 }
@@ -149,14 +132,14 @@ pub fn gh_pr_list_error() -> Option<String> {
     }
 }
 
-pub async fn run(endpoint: &str) -> bool {
+pub async fn run(endpoint: &str, backend: Backend) -> bool {
     println!("{}", "git-cli doctor".bold().underline());
     println!();
 
     let checks = [
         check_git(),
         check_gh(),
-        check_ollama(endpoint).await,
+        check_llm(endpoint, backend).await,
     ];
 
     let mut all_ok = true;
