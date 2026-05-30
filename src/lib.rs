@@ -4,6 +4,8 @@ pub mod config;
 pub mod context;
 pub mod doctor;
 pub mod executor;
+pub mod llm;
 pub mod ollama;
+pub mod openai;
 pub mod pr_shortcut;
 pub mod prompt;

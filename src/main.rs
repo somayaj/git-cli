@@ -4,7 +4,9 @@ mod config;
 mod context;
 mod doctor;
 mod executor;
+mod llm;
 mod ollama;
+mod openai;
 mod pr_shortcut;
 mod prompt;
 
@@ -40,7 +42,7 @@ async fn main() {
         }
         Some(Commands::Doctor) => {
             let config = Config::load();
-            if !doctor::run(&config.endpoint).await {
+            if !doctor::run(&config.endpoint, config.backend).await {
                 std::process::exit(1);
             }
             return;
@@ -144,17 +146,23 @@ async fn main() {
         complexity.dimmed()
     );
 
-    let response =
-        match ollama::generate(&config.endpoint, &selected_model, &system_prompt, &user_prompt, &config.keep_alive)
-            .await
+    let response = match llm::generate(
+            &config.endpoint,
+            &selected_model,
+            &system_prompt,
+            &user_prompt,
+            &config.keep_alive,
+            config.backend,
+        )
+        .await
         {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("\n{} {e}", "Error:".red().bold());
                 eprintln!(
-                    "\n{} Make sure Ollama is running: {}",
+                    "\n{} Make sure an LLM server is running: {}",
                     "Hint:".yellow().bold(),
-                    "ollama serve".dimmed()
+                    "ollama serve  or  llama-server".dimmed()
                 );
                 std::process::exit(1);
             }
@@ -178,6 +186,7 @@ fn handle_config(model: Option<String>, endpoint: Option<String>) {
         println!("  model_fast  = {}", config.model_fast.green());
         println!("  model_smart = {}", config.model_smart.green());
         println!("  endpoint    = {}", config.endpoint.green());
+        println!("  backend     = {}", config.backend.label().green());
         println!("  keep_alive  = {}", config.keep_alive.green());
         if !config.aliases.is_empty() {
             println!("  {}", "aliases:".bold());

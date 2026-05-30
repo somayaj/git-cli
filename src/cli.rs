@@ -18,11 +18,11 @@ pub struct Cli {
     #[arg(long)]
     pub force: bool,
 
-    /// Override the Ollama model to use
+    /// Override the LLM model to use
     #[arg(short, long)]
     pub model: Option<String>,
 
-    /// Override the Ollama API endpoint
+    /// Override the LLM API endpoint
     #[arg(short, long)]
     pub endpoint: Option<String>,
 
@@ -57,6 +57,6 @@ pub enum Commands {
     /// Create a starter prompt config at ~/.config/git-cli/prompt.toml
     InitConfig,
 
-    /// Check that git, gh, and Ollama are installed and reachable
+    /// Check that git, gh, and an LLM server (Ollama or llama.cpp) are reachable
     Doctor,
 }
