@@ -3,6 +3,11 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
+struct ChatTemplateKwargs {
+    enable_thinking: bool,
+}
+
+#[derive(Serialize)]
 struct ChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
@@ -10,6 +15,8 @@ struct ChatRequest {
     max_tokens: u32,
     temperature: f32,
     stop: Vec<String>,
+    /// Disable Qwen3 reasoning on llama-server so output lands in `content`.
+    chat_template_kwargs: ChatTemplateKwargs,
 }
 
 #[derive(Serialize)]
@@ -58,6 +65,9 @@ pub async fn generate(
         max_tokens: 512,
         temperature: 0.1,
         stop: vec!["\n\n\n".to_string()],
+        chat_template_kwargs: ChatTemplateKwargs {
+            enable_thinking: false,
+        },
     };
 
     let response = client
@@ -117,4 +127,33 @@ pub async fn generate(
     }
 
     Ok(full_response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_request_disables_thinking() {
+        let req = ChatRequest {
+            model: "qwen3-4b".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "test".to_string(),
+            }],
+            stream: true,
+            max_tokens: 512,
+            temperature: 0.1,
+            stop: vec![],
+            chat_template_kwargs: ChatTemplateKwargs {
+                enable_thinking: false,
+            },
+        };
+
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(
+            json.pointer("/chat_template_kwargs/enable_thinking"),
+            Some(&serde_json::Value::Bool(false))
+        );
+    }
 }
