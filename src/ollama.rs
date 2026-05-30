@@ -8,6 +8,8 @@ struct ChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
     stream: bool,
+    /// Disable reasoning traces on thinking models (e.g. Qwen3) so output lands in `content`.
+    think: bool,
     options: GenerateOptions,
     keep_alive: String,
 }
@@ -61,6 +63,7 @@ pub async fn generate(
             },
         ],
         stream: true,
+        think: false,
         options: GenerateOptions {
             num_predict: 512,
             temperature: 0.1,
@@ -110,4 +113,31 @@ pub async fn generate(
     }
 
     Ok(full_response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_request_disables_thinking() {
+        let req = ChatRequest {
+            model: "qwen3:4b".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "test".to_string(),
+            }],
+            stream: true,
+            think: false,
+            options: GenerateOptions {
+                num_predict: 512,
+                temperature: 0.1,
+                stop: vec![],
+            },
+            keep_alive: "10m".to_string(),
+        };
+
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json.get("think"), Some(&serde_json::Value::Bool(false)));
+    }
 }
