@@ -1,6 +1,6 @@
 # git-cli
 
-A CLI tool that translates natural-language task descriptions into git (and GitHub CLI) commands using a local [Ollama](https://ollama.com) LLM.
+A CLI tool that translates natural-language task descriptions into git (and GitHub CLI) commands using a local LLM — [Ollama](https://ollama.com) or [llama.cpp](https://github.com/ggml-org/llama.cpp) (`llama-server`).
 
 Works in any terminal — IntelliJ, Cursor, VS Code, and others.
 
@@ -14,7 +14,7 @@ Works in any terminal — IntelliJ, Cursor, VS Code, and others.
 ## Prerequisites
 
 - [Git](https://git-scm.com) on your PATH
-- [Ollama](https://ollama.com) running locally with models pulled
+- A local LLM server — [Ollama](https://ollama.com) **or** [llama.cpp](https://github.com/ggml-org/llama.cpp) (`llama-server`)
 - [GitHub CLI](https://cli.github.com) (`gh`) — required for PR create/merge tasks
 
 ```bash
@@ -22,8 +22,11 @@ Works in any terminal — IntelliJ, Cursor, VS Code, and others.
 brew install gh
 gh auth login
 
-# Pull the default models
+# Pull the default models (Ollama)
 ollama pull qwen2.5:3b
+
+# Or run llama-server (OpenAI-compatible API on port 11434)
+# llama-server -hf unsloth/Qwen3-4B-GGUF:Q4_K_M --alias qwen3-4b --port 11434
 
 # Verify everything is set up
 git-cli doctor
@@ -133,7 +136,7 @@ Settings are stored in `~/.git-cli.toml`:
 # View current settings
 git-cli config
 
-# Set a custom Ollama endpoint
+# Set a custom LLM endpoint
 git-cli config --endpoint http://myserver:11434
 ```
 
@@ -144,6 +147,7 @@ model_fast = "qwen2.5:3b"
 model_smart = "qwen2.5:3b"
 endpoint = "http://localhost:11434"
 keep_alive = "10m"
+backend = "auto"   # auto | ollama | openai — auto-detects Ollama or llama.cpp
 
 [aliases]
 undo = "undo my last commit but keep changes"
@@ -151,6 +155,21 @@ pub = "push and set upstream"
 ```
 
 CLI flags (`--model`, `--endpoint`) override the config file. `--model` overrides both fast and smart for that invocation.
+
+### llama.cpp (llama-server)
+
+git-cli auto-detects llama.cpp when Ollama is not running on the configured endpoint. Use the model name from `--alias`:
+
+```bash
+llama-server -hf unsloth/Qwen3-4B-GGUF:Q4_K_M --alias qwen3-4b --port 11434
+
+git-cli config --model qwen3-4b
+git-cli config --endpoint http://localhost:11434
+git-cli doctor   # ✓ llm — OpenAI-compatible server (llama.cpp) at ...
+git-cli "show status"
+```
+
+Set `backend = "openai"` in `~/.git-cli.toml` to skip Ollama detection and always use the OpenAI-compatible API.
 
 ### Prompt Customization
 
@@ -225,7 +244,7 @@ git-cli completions fish > ~/.config/fish/completions/git-cli.fish
 2. Gathers context from the current git repo (branch, status, recent log, remotes).
 3. Classifies the task as simple or complex and selects the appropriate model.
 4. Builds a system prompt with rules and few-shot examples, plus a user prompt with repo context.
-5. Sends the prompt to the local Ollama chat API.
+5. Sends the prompt to the local LLM (Ollama `/api/chat` or llama.cpp `/v1/chat/completions`).
 6. Parses the response: joins multi-line commands, strips markdown, auto-fixes case/esac globs.
 7. Validates commands: blocks injection, checks HEAD~N against actual commit count, flags destructive ops.
 8. Displays commands with syntax highlighting.
