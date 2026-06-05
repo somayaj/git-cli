@@ -1,16 +1,30 @@
 ---
-description: Never add Cursor co-author or attribution trailers to git commits
+description: Git commit messages — no CN-* prefixes or Cursor attribution
 alwaysApply: true
 ---
 
-# Git Commits — No Cursor Attribution
+# Git Commits — Clean Messages Only
 
-Never add commit message trailers or footers such as:
+Never add ticket placeholders, tool attribution, or vendor trailers to commit messages.
 
-- `Co-authored-by: Cursor <cursoragent@cursor.com>`
-- `Made-with: Cursor` / `Made with Cursor`
-- Any similar tool or vendor attribution
+## Forbidden in commit subject or body
 
-This applies to all commits, amend operations, and commit messages suggested to the user.
+- **CN-* prefixes** — e.g. `CN-0011:`, `CN-XXXX:`, or any `CN-` ticket placeholder
+- **Cursor attribution** — e.g. `Co-authored-by: Cursor <cursoragent@cursor.com>`
+- **Other tool footers** — e.g. `Made-with: Cursor`, `Made with Cursor`
 
-When committing via git, use only the commit subject and body the user requested — nothing else in the message.
+## Required format
+
+Use conventional commits only — subject (+ optional body) with no extra trailers:
+
+```
+feat: add mistral.rs HTTP backend
+
+Optional body paragraph explaining why.
+```
+
+## When committing via git
+
+- Use only the subject and body the user requested
+- Do not append CN-* placeholders “for AI-generated commits”
+- Do not append Co-authored-by or Made-with lines from the IDE or agent
