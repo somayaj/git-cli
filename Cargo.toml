@@ -1,13 +1,13 @@
 [package]
 name = "git-cli"
-version = "0.5.11"
+version = "0.5.12"
 edition = "2024"
 description = "A CLI tool that translates natural-language task descriptions into git commands using a local LLM (mistral.rs, Ollama, or llama.cpp)"
 license = "MIT"
 authors = ["somayaj"]
 repository = "https://github.com/somayaj/git-cli"
 homepage = "https://github.com/somayaj/git-cli"
-keywords = ["git", "cli", "ollama", "mistral", "llm", "ai"]
+keywords = ["git", "cli", "ollama", "mistral", "llm"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
 
