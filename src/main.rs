@@ -42,7 +42,7 @@ async fn main() {
         }
         Some(Commands::Doctor) => {
             let config = Config::load();
-            if !doctor::run(&config.endpoint, config.backend).await {
+            if !doctor::run(&config.endpoint, &config.endpoint_ollama, config.backend).await {
                 std::process::exit(1);
             }
             return;
@@ -148,6 +148,7 @@ async fn main() {
 
     let response = match llm::generate(
             &config.endpoint,
+            &config.endpoint_ollama,
             &selected_model,
             &system_prompt,
             &user_prompt,
@@ -162,7 +163,7 @@ async fn main() {
                 eprintln!(
                     "\n{} Make sure an LLM server is running: {}",
                     "Hint:".yellow().bold(),
-                    "ollama serve  or  llama-server".dimmed()
+                    "ollama serve  or  mistralrs serve".dimmed()
                 );
                 std::process::exit(1);
             }
@@ -186,6 +187,7 @@ fn handle_config(model: Option<String>, endpoint: Option<String>) {
         println!("  model_fast  = {}", config.model_fast.green());
         println!("  model_smart = {}", config.model_smart.green());
         println!("  endpoint    = {}", config.endpoint.green());
+        println!("  endpoint_ollama = {}", config.endpoint_ollama.green());
         println!("  backend     = {}", config.backend.label().green());
         println!("  keep_alive  = {}", config.keep_alive.green());
         if !config.aliases.is_empty() {

@@ -4,16 +4,24 @@ use std::fs;
 use std::path::PathBuf;
 use dirs;
 
-const DEFAULT_MODEL_FAST: &str = "qwen2.5:3b";
-const DEFAULT_MODEL_SMART: &str = "qwen2.5:3b";
-const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
+pub const DEFAULT_MODEL_FAST: &str = "qwen2.5:3b";
+pub const DEFAULT_MODEL_SMART: &str = "qwen2.5:3b";
+/// Default [mistral.rs](https://github.com/EricLBuehler/mistral.rs) OpenAI-compatible server (`mistralrs serve`).
+pub const DEFAULT_ENDPOINT_MISTRALRS: &str = "http://127.0.0.1:1234";
+pub const DEFAULT_ENDPOINT_OLLAMA: &str = "http://localhost:11434";
 const DEFAULT_KEEP_ALIVE: &str = "10m";
+
+/// Hugging Face model id when the configured name is the Ollama-style `qwen2.5:3b` tag.
+pub const HF_QWEN25_3B: &str = "Qwen/Qwen2.5-3B-Instruct";
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Backend {
     #[default]
     Auto,
+    /// OpenAI-compatible HTTP API ([mistral.rs](https://github.com/EricLBuehler/mistral.rs) `serve`, llama.cpp, etc.).
+    #[serde(alias = "mistralrs")]
+    MistralrsHttp,
     Ollama,
     Openai,
 }
@@ -28,6 +36,9 @@ pub struct Config {
     pub model: Option<String>,
     #[serde(default = "default_endpoint")]
     pub endpoint: String,
+    /// Ollama URL used when `backend = auto` or `backend = ollama`.
+    #[serde(default = "default_endpoint_ollama")]
+    pub endpoint_ollama: String,
     #[serde(default = "default_keep_alive")]
     pub keep_alive: String,
     #[serde(default)]
@@ -45,7 +56,11 @@ fn default_model_smart() -> String {
 }
 
 fn default_endpoint() -> String {
-    DEFAULT_ENDPOINT.to_string()
+    DEFAULT_ENDPOINT_MISTRALRS.to_string()
+}
+
+fn default_endpoint_ollama() -> String {
+    DEFAULT_ENDPOINT_OLLAMA.to_string()
 }
 
 fn default_keep_alive() -> String {
@@ -59,6 +74,7 @@ impl Default for Config {
             model_smart: default_model_smart(),
             model: None,
             endpoint: default_endpoint(),
+            endpoint_ollama: default_endpoint_ollama(),
             keep_alive: default_keep_alive(),
             backend: Backend::default(),
             aliases: HashMap::new(),
@@ -70,9 +86,19 @@ impl Backend {
     pub fn label(self) -> &'static str {
         match self {
             Backend::Auto => "auto",
+            Backend::MistralrsHttp => "mistralrs",
             Backend::Ollama => "ollama",
             Backend::Openai => "openai",
         }
+    }
+}
+
+/// Map Ollama-style model tags to Hugging Face ids for mistral.rs / OpenAI-compatible servers.
+pub fn resolve_model_for_server(model: &str) -> String {
+    if model == DEFAULT_MODEL_FAST || model == "qwen2.5:3b" {
+        HF_QWEN25_3B.to_string()
+    } else {
+        model.to_string()
     }
 }
 

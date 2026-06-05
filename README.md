@@ -1,6 +1,6 @@
 # git-cli
 
-A CLI tool that translates natural-language task descriptions into git (and GitHub CLI) commands using a local LLM — [Ollama](https://ollama.com) or [llama.cpp](https://github.com/ggml-org/llama.cpp) (`llama-server`).
+A CLI tool that translates natural-language task descriptions into git (and GitHub CLI) commands using a local LLM — [mistral.rs](https://github.com/EricLBuehler/mistral.rs) (default), [Ollama](https://ollama.com), or [llama.cpp](https://github.com/ggml-org/llama.cpp) (`llama-server`).
 
 Works in any terminal — IntelliJ, Cursor, VS Code, and others.
 
@@ -14,7 +14,7 @@ Works in any terminal — IntelliJ, Cursor, VS Code, and others.
 ## Prerequisites
 
 - [Git](https://git-scm.com) on your PATH
-- A local LLM server — [Ollama](https://ollama.com) **or** [llama.cpp](https://github.com/ggml-org/llama.cpp) (`llama-server`)
+- A local LLM server — [mistral.rs](https://github.com/EricLBuehler/mistral.rs), [Ollama](https://ollama.com), or [llama.cpp](https://github.com/ggml-org/llama.cpp) (`llama-server`)
 - [GitHub CLI](https://cli.github.com) (`gh`) — required for PR create/merge tasks
 
 ```bash
@@ -22,13 +22,9 @@ Works in any terminal — IntelliJ, Cursor, VS Code, and others.
 brew install gh
 gh auth login
 
-# Pull the default models (Ollama)
-ollama pull qwen2.5:3b
+# Quick start with mistral.rs — see "mistral.rs integration" under Configuration
+# Or use Ollama: ollama pull qwen2.5:3b && ollama serve
 
-# Or run llama-server (OpenAI-compatible API on port 11434)
-# llama-server -hf unsloth/Qwen3-4B-GGUF:Q4_K_M --alias qwen3-4b --port 11434
-
-# Verify everything is set up
 git-cli doctor
 ```
 
@@ -106,7 +102,7 @@ You need the [GitHub CLI](https://cli.github.com) installed and authenticated:
 ```bash
 brew install gh      # macOS
 gh auth login
-git-cli doctor       # verify git, gh, and Ollama are ready
+git-cli doctor       # verify git, gh, and your LLM server are ready
 ```
 
 **Why you must be on a feature branch:** GitHub cannot open a PR from `main` to `main`. If you are on `main`, create a branch first:
@@ -145,9 +141,10 @@ Example `~/.git-cli.toml`:
 ```toml
 model_fast = "qwen2.5:3b"
 model_smart = "qwen2.5:3b"
-endpoint = "http://localhost:11434"
+endpoint = "http://127.0.0.1:1234"       # mistral.rs serve (default)
+endpoint_ollama = "http://localhost:11434"
 keep_alive = "10m"
-backend = "auto"   # auto | ollama | openai — auto-detects Ollama or llama.cpp
+backend = "auto"   # auto | mistralrs | ollama | openai
 
 [aliases]
 undo = "undo my last commit but keep changes"
@@ -156,9 +153,166 @@ pub = "push and set upstream"
 
 CLI flags (`--model`, `--endpoint`) override the config file. `--model` overrides both fast and smart for that invocation.
 
+### mistral.rs integration
+
+git-cli talks to [mistral.rs](https://github.com/EricLBuehler/mistral.rs) over its **OpenAI-compatible** HTTP API (`/v1/chat/completions` on port **1234** by default). No Ollama runtime is required when you use `backend = "mistralrs"`.
+
+#### 1. Install mistral.rs
+
+**macOS (Apple Silicon, recommended):**
+
+```bash
+# Full Xcode + Metal toolchain required for GPU builds
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+xcodebuild -downloadComponent MetalToolchain
+xcrun metal --version   # must succeed
+
+# Install CLI with Metal + Accelerate
+cargo install mistralrs-cli --features "metal accelerate"
+```
+
+Or use the upstream install script (detects hardware):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/EricLBuehler/mistral.rs/master/install.sh | sh
+```
+
+**Linux (NVIDIA):** see [mistral.rs installation](https://ericlbuehler.github.io/mistral.rs/INSTALLATION.html) for `cuda` / `flash-attn` feature flags.
+
+Verify:
+
+```bash
+mistralrs doctor
+```
+
+#### 2. Start the server
+
+Leave this running in a dedicated terminal:
+
+```bash
+mistralrs serve \
+  -m Qwen/Qwen2.5-3B-Instruct \
+  --isq q4k \
+  --max-seq-len 2048
+```
+
+| Flag | Why |
+|------|-----|
+| `-m Qwen/Qwen2.5-3B-Instruct` | Matches git-cli’s default `qwen2.5:3b` mapping |
+| `--isq q4k` | In-situ quantization — fits Apple Silicon RAM, faster load |
+| `--max-seq-len 2048` | Enough for git-cli prompts without oversized KV cache |
+
+**Custom port** (if 1234 is busy):
+
+```bash
+mistralrs serve -m Qwen/Qwen2.5-3B-Instruct --isq q4k --max-seq-len 2048 -p 1235
+```
+
+First start downloads weights and may take several minutes. Wait for `Dummy run completed` and the server listening (not `Address already in use`).
+
+**Check the server:**
+
+```bash
+curl -s http://127.0.0.1:1234/v1/models
+```
+
+#### 3. Configure git-cli
+
+Default settings (used when `~/.git-cli.toml` is missing):
+
+| Setting | Default |
+|---------|---------|
+| `endpoint` | `http://127.0.0.1:1234` |
+| `endpoint_ollama` | `http://localhost:11434` |
+| `backend` | `auto` |
+| `model_fast` / `model_smart` | `qwen2.5:3b` |
+
+**mistral.rs only** — add to `~/.git-cli.toml`:
+
+```toml
+model_fast = "qwen2.5:3b"
+model_smart = "qwen2.5:3b"
+endpoint = "http://127.0.0.1:1234"
+endpoint_ollama = "http://localhost:11434"
+backend = "mistralrs"
+```
+
+**Custom port:**
+
+```toml
+endpoint = "http://127.0.0.1:1235"
+backend = "mistralrs"
+```
+
+**Auto (default)** — Ollama wins if it is running on `endpoint_ollama`; otherwise git-cli uses mistral.rs on `endpoint`:
+
+```toml
+backend = "auto"
+endpoint = "http://127.0.0.1:1234"
+endpoint_ollama = "http://localhost:11434"
+```
+
+Stop Ollama when you want git-cli to use mistral.rs under `auto`:
+
+```bash
+brew services stop ollama   # macOS
+```
+
+**Ollama only** (ignore mistral.rs):
+
+```toml
+endpoint = "http://localhost:11434"
+endpoint_ollama = "http://localhost:11434"
+backend = "ollama"
+```
+
+#### 4. Model names
+
+git-cli sends the model id from config to the server. For mistral.rs, Ollama-style tags are mapped automatically:
+
+| In `~/.git-cli.toml` | Sent to mistral.rs |
+|----------------------|-------------------|
+| `qwen2.5:3b` | `Qwen/Qwen2.5-3B-Instruct` |
+| `Qwen/Qwen2.5-3B-Instruct` | unchanged |
+| any other string | unchanged |
+
+The Hugging Face id in `mistralrs serve -m` must match what git-cli requests (or use `qwen2.5:3b` in config).
+
+#### 5. Run git-cli
+
+```bash
+git-cli doctor
+git-cli "show status"
+git-cli "show status" --verbose   # stream raw LLM output on stderr
+```
+
+`git-cli doctor` should report something like: `mistral.rs server at http://127.0.0.1:1234`.
+
+Override for one command:
+
+```bash
+git-cli "show status" --endpoint http://127.0.0.1:1235 --model qwen2.5:3b
+```
+
+#### 6. Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `No LLM server reachable` | Start `mistralrs serve`; check `curl http://127.0.0.1:1234/v1/models` |
+| `Address already in use` | Another `mistralrs serve` is running — use it or `kill` the old PID |
+| `model does not fit on devices` | Add `--isq q4k`, lower `--max-seq-len 2048`, free RAM, or use a smaller model |
+| `xcrun: unable to find utility "metal"` | Install Xcode + Metal toolchain (see step 1) |
+| git-cli uses Ollama, not mistral.rs | `backend = "mistralrs"` or stop Ollama when using `auto` |
+| Very slow first request | Large git-cli prompt + cold server; second request is faster (prefix cache) |
+| Wrong / empty commands | Use `qwen2.5:3b` or `Qwen2.5-3B`; avoid tiny models (0.5B) for git-cli |
+
+**Performance:** On macOS, Ollama with `qwen2.5:3b` is often faster for day-to-day git-cli use. mistral.rs is a good fit when you want Hugging Face models, in-situ quantization, or a single Rust inference stack.
+
+See also: [mistral.rs docs](https://github.com/EricLBuehler/mistral.rs), [device mapping](https://github.com/EricLBuehler/mistral.rs/blob/master/docs/DEVICE_MAPPING.md).
+
 ### llama.cpp (llama-server)
 
-git-cli auto-detects llama.cpp when Ollama is not running on the configured endpoint. Use the model name from `--alias`:
+git-cli auto-detects llama.cpp when Ollama is not running on `endpoint_ollama`. Use the model name from `--alias`:
 
 ```bash
 llama-server -hf unsloth/Qwen3-4B-GGUF:Q4_K_M --alias qwen3-4b --port 11434
@@ -244,7 +398,7 @@ git-cli completions fish > ~/.config/fish/completions/git-cli.fish
 2. Gathers context from the current git repo (branch, status, recent log, remotes).
 3. Classifies the task as simple or complex and selects the appropriate model.
 4. Builds a system prompt with rules and few-shot examples, plus a user prompt with repo context.
-5. Sends the prompt to the local LLM (Ollama `/api/chat` or llama.cpp `/v1/chat/completions`).
+5. Sends the prompt to the local LLM (Ollama `/api/chat` or OpenAI-compatible `/v1/chat/completions` for mistral.rs / llama.cpp).
 6. Parses the response: joins multi-line commands, strips markdown, auto-fixes case/esac globs.
 7. Validates commands: blocks injection, checks HEAD~N against actual commit count, flags destructive ops.
 8. Displays commands with syntax highlighting.
